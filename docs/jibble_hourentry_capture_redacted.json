@@ -1,0 +1,99 @@
+{
+  "capture_notes": {
+    "source": "Reconstructed from Chrome DevTools Jibble request and response provided by the user on 2026-11-20; redacted for developer use.",
+    "verified": [
+      "Browser posted JSON batch envelope to https://time-tracking.prod.jibble.io/v1/$batch",
+      "One inner request POSTed to https://time-tracking.prod.jibble.io/v1/HourEntries",
+      "Outer HTTP response was 200; inner response r1 was 201 Created",
+      "Inner response returned created Hour Entry ID, location, duration, project/activity and isLocked=false",
+      "The observed test created a real 2-hour entry; do not recreate it"
+    ],
+    "not_captured": [
+      "Exact outer HTTP request Content-Type and authorization headers were not supplied. Do not invent them as observed evidence.",
+      "No separate native backend POST using client-credentials was verified yet."
+    ],
+    "redaction": "REDACTED_* values stand in for real UUIDs and personal information. They are NOT runtime values or approved mappings. Never send this file's example payload as a live request.",
+    "write_safety": "Do not run a real create without explicit approval, verified employee/project/activity mappings and the external-write gate. Preserve historical Jibble records."
+  },
+  "request": {
+    "method": "POST",
+    "url": "https://time-tracking.prod.jibble.io/v1/$batch",
+    "headers": {
+      "content-type": "NOT_CAPTURED"
+    },
+    "body": {
+      "requests": [
+        {
+          "url": "https://time-tracking.prod.jibble.io/v1/HourEntries",
+          "headers": {
+            "odata-version": "4.0"
+          },
+          "id": "r1",
+          "atomicityGroup": "ag1",
+          "body": {
+            "personId": "REDACTED_PERSON_UUID",
+            "date": "2026-11-20",
+            "duration": "PT2H",
+            "activityId": "REDACTED_ACTIVITY_UUID",
+            "clientType": "Web",
+            "id": "REDACTED_ENTRY_UUID",
+            "note": "DTB integration test",
+            "platform": {
+              "deviceName": "Chrome",
+              "deviceModel": null,
+              "clientVersion": "157.0.0.0",
+              "os": "Windows"
+            },
+            "projectId": "REDACTED_PROJECT_UUID"
+          },
+          "method": "POST"
+        }
+      ]
+    }
+  },
+  "response": {
+    "outer_http_status": 200,
+    "body": {
+      "responses": [
+        {
+          "id": "r1",
+          "atomicityGroup": "REDACTED_RESPONSE_ATOMICITY_GROUP_UUID",
+          "status": 201,
+          "headers": {
+            "location": "https://time-tracking.prod.jibble.io/v1/HourEntries(REDACTED_ENTRY_UUID)",
+            "content-type": "application/json; odata.metadata=minimal; odata.streaming=true; charset=utf-8",
+            "odata-version": "4.0"
+          },
+          "body": {
+            "@odata.context": "https://time-tracking.prod.jibble.io/v1/$metadata#HourEntries/$entity",
+            "@odata.etag": "REDACTED_ETAG",
+            "personId": "REDACTED_PERSON_UUID",
+            "organizationId": "REDACTED_ORGANIZATION_UUID",
+            "date": "2026-11-20",
+            "duration": "PT2H",
+            "activityId": "REDACTED_ACTIVITY_UUID",
+            "projectId": "REDACTED_PROJECT_UUID",
+            "projectTaskId": null,
+            "locationId": null,
+            "note": "DTB integration test",
+            "createdAt": "2026-11-20T08:34:08.9499508Z",
+            "updatedAt": "2026-11-20T08:34:08.9499508Z",
+            "isLocked": false,
+            "status": "Active",
+            "clientType": "Web",
+            "id": "REDACTED_ENTRY_UUID",
+            "platform": {
+              "clientVersion": "157.0.0.0",
+              "os": "Windows",
+              "deviceModel": null,
+              "deviceId": null,
+              "deviceName": "Chrome",
+              "eventId": null,
+              "isQrKiosk": false
+            }
+          }
+        }
+      ]
+    }
+  }
+}

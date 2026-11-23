@@ -1,0 +1,8 @@
+[
+  {
+    "name": "Example Employee",
+    "email": "employee@example.com",
+    "openproject_user_id": 1001,
+    "chat_user_id": "users/100000000000000000001"
+  }
+]
