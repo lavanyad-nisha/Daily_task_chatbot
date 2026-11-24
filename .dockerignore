@@ -1,0 +1,12 @@
+.git
+.venv
+.env
+secrets/
+backups/
+tests/
+docs/
+**/__pycache__
+.pytest_cache
+.ruff_cache
+config/*.json
+!config/*.example.json

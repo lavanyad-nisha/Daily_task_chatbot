@@ -59,6 +59,28 @@ Use a dedicated PostgreSQL database and role for this project. Do not point it a
 
 Live database tests are skipped when `DTB_TEST_DATABASE_URL` is not set. Offline tests always run.
 
+## Google Chat endpoint (Workspace add-on)
+
+The Chat app is configured with "Build this Chat app as a Google Workspace add-on", so Google sends
+add-on events (`commonEventObject` + `chat.*Payload`) signed by the project's add-on service
+account. `api/addon.py` converts them to the plain Chat event shape and wraps replies as
+`hostAppDataAction.chatDataAction.createMessageAction`. Plain Chat app events still work.
+
+- `DTB_CHAT_ENDPOINT_AUDIENCE`: the exact endpoint URL set in the Chat API configuration.
+- `DTB_CHAT_ADDON_SERVICE_ACCOUNT`: `service-<PROJECT_NUMBER>@gcp-sa-gsuiteaddons.iam.gserviceaccount.com`.
+  Tokens from any other signer are refused, even with the right audience.
+- Employees are matched by Chat user ID. The first time, an employee without a Chat user ID is
+  linked by the Google-verified email in the event. An existing link is never replaced.
+- Only Chat user IDs in `DTB_PILOT_CHAT_USER_IDS` can use the commands. The server log shows the
+  ID of anyone who is refused (`chat user not in pilot list: users/...`).
+
+## Docker
+
+```bash
+docker build -t daily-task-bot .
+docker run --env-file .env -p 8000:8000 daily-task-bot   # runs migrations, then serves :8000
+```
+
 ## Decisions recorded
 
 - External writes (Chat posts now; Jibble and OpenProject later) are off by default. A live run needs `DTB_ALLOW_EXTERNAL_WRITES=true` as well as `DTB_DRY_RUN=false`.
