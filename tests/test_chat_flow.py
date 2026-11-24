@@ -49,14 +49,16 @@ class FakeOpenProject:
         return self.statuses
 
     async def get_open_work_packages(self, statuses, project_ids=None):
-        return [WorkPackage(id=w, subject=f"Task {w}", status_name="Tested", status_is_closed=False,
-                            assignee_id=OP_USER) for w in self.assigned if w not in self.closed]
+        return [WorkPackage(id=w, subject=f"Task {w}", status_name="In progress", status_id=7, status_is_closed=False,
+                            assignee_id=OP_USER, start_date=date(2026, 11, 20), due_date=date(2026, 11, 30))
+                for w in self.assigned if w not in self.closed]
 
     async def get_work_package(self, wp_id, statuses=None):
         if wp_id not in self.assigned and wp_id not in self.closed:
             return None
         return WorkPackageDetail(id=wp_id, assignee_id=OP_USER, status_is_closed=wp_id in self.closed,
-                                 status_id=10, lock_version=1)
+                                 status_id=7, lock_version=1,
+                                 start_date=date(2026, 11, 20), due_date=date(2026, 11, 30))
 
 
 class FakeGChat:

@@ -46,6 +46,16 @@ def _id_from_href(href: str | None) -> int | None:
         return None
 
 
+def _parse_date(value: str | None) -> date | None:
+    """OpenProject dates are ISO "YYYY-MM-DD" strings, or null when not set."""
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None
+
+
 @dataclass(frozen=True)
 class TimeEntrySnapshot:
     """A read-only view of an existing OpenProject time entry."""
@@ -89,6 +99,8 @@ class WorkPackageDetail:
     # True only when OpenProject lists an update link for the API user on this work package.
     # Absent or unknown = False, so the bot does not attempt the change.
     can_update: bool = False
+    start_date: date | None = None
+    due_date: date | None = None
 
 
 class OpenProjectClient:
@@ -179,6 +191,8 @@ class OpenProjectClient:
             status_id=_id_from_href(links.get("status", {}).get("href")),
             lock_version=data.get("lockVersion"),
             can_update="updateImmediately" in links,
+            start_date=_parse_date(data.get("startDate")),
+            due_date=_parse_date(data.get("dueDate")),
         )
 
     async def get_allowed_status_ids(self, work_package_id: int, *, lock_version: int) -> set[int]:
@@ -281,6 +295,9 @@ class OpenProjectClient:
             status_is_closed=is_closed,
             priority_name=priority.get("name"),
             assignee_id=_id_from_href(links.get("assignee", {}).get("href")),
+            status_id=status_id,
+            start_date=_parse_date(element.get("startDate")),
+            due_date=_parse_date(element.get("dueDate")),
         )
 
     async def list_time_entries(self, filters: list[dict[str, Any]]) -> list[dict[str, Any]]:

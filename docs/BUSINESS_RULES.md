@@ -26,6 +26,59 @@ updates off. Enforced by `tests/test_business_rules.py`.
 | 5. Sync to Jibble | Not built. Blocked on Jibble API details and mapping. | none yet |
 | 6. Next-day reminders from latest assignments and previous DSR | Not built. Planned as T7. | none yet |
 
+## Task visibility (built; tests in `tests/test_task_window.py`)
+
+Manager's rule: each task has a start date and a due date, set in OpenProject. An employee's list
+(DSR card, `TASKS`, 9:30 AM plan, daily summary) shows a task only when all are true:
+1. It is not completed. Completed means closed or rejected in OpenProject, or one of the statuses
+   Tested (10), Resolved (16), Passed (17) (`COMPLETED_STATUS_IDS`). Completed tasks never appear.
+2. Its assignee is that employee's OpenProject user ID.
+3. Today is between its start date and due date, inclusive (`startDate` and `dueDate`).
+4. It has both a start date and a due date. A task with either missing is hidden.
+5. It belongs to a project in `DTB_OPENPROJECT_PROJECT_IDS`, when that list is set.
+
+Overdue tasks (due date passed) are hidden, not kept. This follows "start fresh": old tasks do not
+come back. Trade-off: an employee who is still working on a task after its due date can't see it
+or log hours for it until management moves the dates.
+
+Next task: once the current task is closed in OpenProject, the next task whose start date has come
+appears. Nothing else needs to happen.
+
+Submission check: a DSR entry is refused if its task is not scheduled for today (same rule as
+point 3 and 4 above).
+
+Existing tasks: they have no start or due dates yet. Under this rule they stay hidden until dates
+are set in OpenProject, so the manager's new tasks are the ones that start appearing.
+
+Note: earlier the code deliberately ignored OpenProject dates as stale (`API_MAPPINGS.md`,
+`models.py`). Those notes are now out of date for start and due dates. Percentage done and
+estimates are still not used.
+
+"Newly assigned" marks a task as NEW. A task is NEW until the bot has shown it to the employee
+once. The bot records each (employee, work package) pair the first time it shows it.
+
+Default proposed here (option B): open assigned tasks keep appearing every day, and NEW ones are
+marked and listed first. Reason: if a task were hidden after one day, the employee could no longer
+log hours for it in the DSR.
+
+Option A, if chosen instead: a task is shown only on the first day it is seen, then hidden. The
+consequence is that hours can't be logged for it after that day.
+
+Needs: a per-employee "seen" record (new table) and a migration. Tests will cover closed, reassigned,
+and NEW-then-seen cases.
+
+## DSR submission flow (as built)
+
+1. Employee types `DSR`. The card lists the tasks from the visibility rule above.
+2. Employee enters hours, work done, remaining work and status per task, then submits.
+3. Bot checks the form (today's date, no field errors, at least one entry with hours).
+4. Bot re-reads each task from OpenProject. Any task that is missing, closed, or not assigned to
+   the employee rejects the whole submission. Nothing is saved.
+5. Bot saves a draft, then confirms it. One current DSR per employee per day; a second
+   submission is refused.
+6. Confirmed entries are queued for OpenProject time-entry sync, only for DSRs on or after the
+   go-live date. Sync re-checks open and assigned status before each write.
+
 ## Not allowed (enforced in code)
 
 - Creating, assigning, reassigning or deleting work packages.

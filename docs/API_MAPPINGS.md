@@ -14,8 +14,9 @@ from the API reference or planned, not yet checked. **Blocked** = needs details 
 | Work description | Employee input | `dsr_entries.work_done` | Model in place |
 | Remaining work | Employee input (optional) | `dsr_entries.remaining_work` | Open decision: required or optional |
 
-The form shows only assigned, open tasks. Dates, estimates and completion percentages are
-not read into the form or the summary.
+The form shows only assigned, open tasks whose start date is today or earlier (see
+docs/BUSINESS_RULES.md, "Task visibility"). OpenProject start and due dates are read for this.
+Estimates and completion percentages are not read into the form or the summary.
 
 ## OpenProject
 
