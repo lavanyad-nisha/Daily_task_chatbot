@@ -297,3 +297,19 @@ class ProjectRoute(TimestampMixin, Base):
     chat_space_id: Mapped[str] = mapped_column(String(100))
     space_label: Mapped[str | None] = mapped_column(String(100))
     is_active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+
+
+class RoutedPost(TimestampMixin, Base):
+    """One message per employee, per Chat space, per day. Written only after a real post."""
+
+    __tablename__ = "routed_posts"
+    __table_args__ = (
+        UniqueConstraint("employee_id", "space_id", "post_date", name="uq_routed_posts_employee_space_date"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id", ondelete="RESTRICT"))
+    space_id: Mapped[str] = mapped_column(String(100))
+    post_date: Mapped[date] = mapped_column(Date)
+    message_name: Mapped[str | None] = mapped_column(String(200))
+    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -65,6 +65,8 @@ class Settings(BaseSettings):
     # Pilot: the only Chat user IDs that receive reminders or may submit a DSR. Empty = nobody.
     pilot_chat_user_ids: list[str] = Field(default_factory=list)
     evening_reminder_time: str = "18:00"
+    # Local time (HH:MM) after which the day's routed project posts are sent, once per day.
+    routed_post_time: str = "18:30"
 
     # Employee and leave data (local files until directory / calendar access is approved)
     employees_file: Path = Path("config/employees.json")
