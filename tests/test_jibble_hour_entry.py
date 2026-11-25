@@ -59,7 +59,7 @@ def test_body_has_the_verified_fields_and_the_bot_platform():
                     "activityId": "ACTIVITY-1", "id": "ENTRY-1", "note": "DTB integration test",
                     "projectId": "PROJECT-1",
                     "platform": {"deviceName": "Daily Task Bot", "deviceModel": None,
-                                 "clientVersion": "0.1.0", "os": "Windows"}}
+                                 "clientVersion": "0.1.0", "os": "Linux"}}
 
 
 def test_platform_describes_the_bot_not_a_browser():

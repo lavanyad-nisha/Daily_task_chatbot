@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 from daily_task_bot.config import Settings
 from daily_task_bot.db.models import Employee
 from daily_task_bot.domain.chat_commands import HELP_TEXT, parse_command
-from daily_task_bot.domain.task_window import is_scheduled_on
+from daily_task_bot.domain.task_window import TaskRules, is_scheduled_on, task_flag
 from daily_task_bot.services.dsr_updates import TaskChange, apply_task_change
 from daily_task_bot.domain.chat_cards import (
     SUBMIT_FUNCTION,
@@ -104,11 +104,17 @@ async def open_tasks_for(op_client: Any, employee: Employee, settings: Settings,
     """Tasks for the DSR card and TASKS: open, assigned to the employee, and scheduled for today."""
     statuses = await op_client.get_statuses()
     packages = await op_client.get_open_work_packages(statuses, settings.openproject_project_ids or None)
+    rules = TaskRules.from_settings(settings)
     return [
-        CardTask(wp.id, wp.subject, wp.status_name)
+        CardTask(wp.id, wp.subject, _status_label(wp, today))
         for wp in sorted(packages, key=lambda w: w.id)
-        if wp.assignee_id == employee.openproject_user_id and is_scheduled_on(wp, today)
+        if wp.assignee_id == employee.openproject_user_id and is_scheduled_on(wp, today, rules)
     ]
+
+
+def _status_label(wp: Any, today: date) -> str:
+    flag = task_flag(wp, today)
+    return f"{wp.status_name}, {flag}" if flag else wp.status_name
 
 
 async def status_choices_for(op_client: Any, settings: Settings) -> list[StatusChoice]:
@@ -130,7 +136,9 @@ def _text(message: str) -> dict[str, Any]:
     return {"text": message}
 
 
-async def _validate_tasks(op_client: Any, employee: Employee, work_package_ids: list[int], today: date) -> list[str]:
+async def _validate_tasks(op_client: Any, employee: Employee, work_package_ids: list[int], today: date,
+                         rules: TaskRules | None = None) -> list[str]:
+    rules = rules or TaskRules()
     statuses = await op_client.get_statuses()
     problems: list[str] = []
     for wp_id in work_package_ids:
@@ -141,7 +149,7 @@ async def _validate_tasks(op_client: Any, employee: Employee, work_package_ids: 
             problems.append(f"#{wp_id} is closed")
         elif detail.assignee_id != employee.openproject_user_id:
             problems.append(f"#{wp_id} is not assigned to you")
-        elif not is_scheduled_on(detail, today):
+        elif not is_scheduled_on(detail, today, rules):
             problems.append(f"#{wp_id} is not scheduled for today")
     return problems
 
@@ -182,7 +190,8 @@ async def handle_chat_event(
         tasks = await open_tasks_for(op_client, employee, settings, today)
         if command.name == "TASKS":
             if not tasks:
-                return _text("You have no open assigned tasks.")
+                return _text("You have no open tasks for today. A task shows up here when it is assigned to "
+                             "you in OpenProject, not completed, and its start date has come.")
             lines = [f"{i}. #{t.work_package_id} {t.subject} ({t.status_name})"
                      for i, t in enumerate(tasks, start=1)]
             return _text("Your open tasks:\n" + "\n".join(lines))
@@ -215,7 +224,8 @@ async def handle_chat_event(
             return _text("Please fix these and submit again: " + "; ".join(parsed.errors))
         if not parsed.entries:
             return _text("No hours were entered, so nothing was recorded.")
-        problems = await _validate_tasks(op_client, employee, [e.work_package_id for e in parsed.entries], today)
+        problems = await _validate_tasks(op_client, employee, [e.work_package_id for e in parsed.entries], today,
+                                        TaskRules.from_settings(settings))
         if problems:
             return _text("Nothing was recorded. " + "; ".join(problems))
         try:

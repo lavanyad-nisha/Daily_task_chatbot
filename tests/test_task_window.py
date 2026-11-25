@@ -7,7 +7,9 @@ from datetime import date
 
 from daily_task_bot.config import Settings
 from daily_task_bot.domain.models import Employee, WorkPackage
-from daily_task_bot.domain.task_window import COMPLETED_STATUS_IDS, is_scheduled_on
+from daily_task_bot.domain.task_window import (
+    COMPLETED_STATUS_IDS, NO_DATES, OVERDUE, TaskRules, is_scheduled_on, task_flag,
+)
 from daily_task_bot.services.chat_events import _validate_tasks, open_tasks_for
 
 TODAY = date(2026, 11, 24)
@@ -34,8 +36,17 @@ def test_task_due_today_is_listed():
     assert is_scheduled_on(wp(1, start=date(2026, 11, 20), due=TODAY), TODAY)
 
 
-def test_overdue_open_task_is_not_listed():
-    assert not is_scheduled_on(wp(1, start=date(2026, 7, 29), due=date(2026, 8, 10)), TODAY)
+STRICT = TaskRules(show_overdue=False, show_undated=False)
+
+
+def test_overdue_open_task_is_listed_and_flagged_by_default():
+    late = wp(1, start=date(2026, 7, 29), due=date(2026, 8, 10))
+    assert is_scheduled_on(late, TODAY)
+    assert task_flag(late, TODAY) == OVERDUE
+
+
+def test_overdue_task_is_hidden_when_show_overdue_is_off():
+    assert not is_scheduled_on(wp(1, start=date(2026, 7, 29), due=date(2026, 8, 10)), TODAY, STRICT)
 
 
 def test_closed_task_is_never_listed():
@@ -53,10 +64,32 @@ def test_test_failed_and_on_hold_stay_listed():
     assert is_scheduled_on(wp(2, status_id=13), TODAY)  # On hold
 
 
-def test_task_without_start_or_due_date_is_not_listed():
-    assert not is_scheduled_on(wp(1, start=None, due=date(2026, 11, 30)), TODAY)
-    assert not is_scheduled_on(wp(1, start=date(2026, 11, 20), due=None), TODAY)
-    assert not is_scheduled_on(wp(1, start=None, due=None), TODAY)
+def test_task_without_dates_is_listed_and_flagged_by_default():
+    for task in (wp(1, start=None, due=date(2026, 11, 30)), wp(1, start=date(2026, 11, 20), due=None),
+                 wp(1, start=None, due=None)):
+        assert is_scheduled_on(task, TODAY)
+        assert task_flag(task, TODAY) == NO_DATES
+
+
+def test_task_without_dates_is_hidden_when_show_undated_is_off():
+    assert not is_scheduled_on(wp(1, start=None, due=date(2026, 11, 30)), TODAY, STRICT)
+    assert not is_scheduled_on(wp(1, start=date(2026, 11, 20), due=None), TODAY, STRICT)
+    assert not is_scheduled_on(wp(1, start=None, due=None), TODAY, STRICT)
+
+
+def test_future_start_is_hidden_even_without_a_due_date():
+    assert not is_scheduled_on(wp(1, start=date(2026, 12, 1), due=None), TODAY)
+
+
+def test_completed_statuses_are_configurable():
+    assert is_scheduled_on(wp(1, status_id=10), TODAY, TaskRules(completed_status_ids=frozenset({16})))
+    assert not is_scheduled_on(wp(1, status_id=99), TODAY, TaskRules(completed_status_ids=frozenset({99})))
+
+
+def test_rules_come_from_settings():
+    rules = TaskRules.from_settings(Settings(_env_file=None, completed_status_ids=[5],
+                                             show_overdue_tasks=False, show_undated_tasks=False))
+    assert rules == TaskRules(completed_status_ids=frozenset({5}), show_overdue=False, show_undated=False)
 
 
 class FakeOpenProject:
@@ -87,21 +120,30 @@ async def test_card_lists_only_tasks_scheduled_for_today_and_assigned():
         wp(1, start=date(2026, 11, 20), due=date(2026, 11, 30)),   # running: listed
         wp(2, start=date(2026, 12, 1), due=date(2026, 12, 9)),     # future: hidden
         wp(3, start=date(2026, 11, 20), due=date(2026, 11, 30), closed=True),  # closed: hidden
-        wp(4, start=None, due=None),                               # no dates: hidden
+        wp(4, start=None, due=None),                               # no dates: listed, flagged
         wp(5, start=date(2026, 11, 20), due=date(2026, 11, 30), assignee=6),   # someone else: hidden
+        wp(6, start=date(2026, 8, 1), due=date(2026, 8, 10)),      # overdue: listed, flagged
     ]
-    tasks = await open_tasks_for(FakeOpenProject(packages), employee(), Settings(), TODAY)
+    tasks = await open_tasks_for(FakeOpenProject(packages), employee(), Settings(_env_file=None), TODAY)
+    assert [(t.work_package_id, t.status_name) for t in tasks] == [
+        (1, "In progress"), (4, "In progress, NO DATES"), (6, "In progress, OVERDUE")]
+
+
+async def test_card_with_strict_rules_lists_only_tasks_in_their_window():
+    packages = [wp(1), wp(4, start=None, due=None), wp(6, start=date(2026, 8, 1), due=date(2026, 8, 10))]
+    settings = Settings(_env_file=None, show_overdue_tasks=False, show_undated_tasks=False)
+    tasks = await open_tasks_for(FakeOpenProject(packages), employee(), settings, TODAY)
     assert [t.work_package_id for t in tasks] == [1]
 
 
 async def test_next_task_appears_once_the_current_one_is_closed():
     t1 = wp(1, start=date(2026, 11, 20), due=date(2026, 11, 30))
     t2 = wp(2, start=date(2026, 11, 25), due=date(2026, 12, 5))
-    before = await open_tasks_for(FakeOpenProject([t1, t2]), employee(), Settings(), TODAY)
+    before = await open_tasks_for(FakeOpenProject([t1, t2]), employee(), Settings(_env_file=None), TODAY)
     assert [t.work_package_id for t in before] == [1]
 
     t1_closed = t1.model_copy(update={"status_is_closed": True})
-    after = await open_tasks_for(FakeOpenProject([t1_closed, t2]), employee(), Settings(), date(2026, 11, 25))
+    after = await open_tasks_for(FakeOpenProject([t1_closed, t2]), employee(), Settings(_env_file=None), date(2026, 11, 25))
     assert [t.work_package_id for t in after] == [2]
 
 

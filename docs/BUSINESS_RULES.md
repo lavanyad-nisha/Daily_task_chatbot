@@ -28,31 +28,28 @@ updates off. Enforced by `tests/test_business_rules.py`.
 
 ## Task visibility (built; tests in `tests/test_task_window.py`)
 
-Manager's rule: each task has a start date and a due date, set in OpenProject. An employee's list
-(DSR card, `TASKS`, 9:30 AM plan, daily summary) shows a task only when all are true:
-1. It is not completed. Completed means closed or rejected in OpenProject, or one of the statuses
-   Tested (10), Resolved (16), Passed (17) (`COMPLETED_STATUS_IDS`). Completed tasks never appear.
+Each task has a start date and a due date, set in OpenProject. An employee's list (DSR card,
+`TASKS`, 9:30 AM plan, daily summary) shows a task when all of these are true:
+1. It is not completed: not closed or rejected in OpenProject, and not one of the statuses in
+   `DTB_COMPLETED_STATUS_IDS` (default Tested 10, Resolved 16, Passed 17).
 2. Its assignee is that employee's OpenProject user ID.
-3. Today is between its start date and due date, inclusive (`startDate` and `dueDate`).
-4. It has both a start date and a due date. A task with either missing is hidden.
-5. It belongs to a project in `DTB_OPENPROJECT_PROJECT_IDS`, when that list is set.
+3. Its start date has come (a task starting in the future is not listed yet).
+4. It belongs to a project in `DTB_OPENPROJECT_PROJECT_IDS`, when that list is set.
 
-Overdue tasks (due date passed) are hidden, not kept. This follows "start fresh": old tasks do not
-come back. Trade-off: an employee who is still working on a task after its due date can't see it
-or log hours for it until management moves the dates.
+Overdue tasks (due date passed) stay listed and are flagged **OVERDUE**, so hours can still be
+logged on late work. `DTB_SHOW_OVERDUE_TASKS=false` hides them instead.
 
-Next task: once the current task is closed in OpenProject, the next task whose start date has come
-appears. Nothing else needs to happen.
+Tasks without a start or due date stay listed and are flagged **NO DATES**. On 25-Nov-2026, 85 of
+191 open assigned tasks had no dates and the other 106 were overdue, so hiding them would have
+emptied every list. Set `DTB_SHOW_UNDATED_TASKS=false` once management has dated the tasks.
 
-Submission check: a DSR entry is refused if its task is not scheduled for today (same rule as
-point 3 and 4 above).
+Next task: once the current task is completed in OpenProject, the next task whose start date has
+come appears. Nothing else needs to happen.
 
-Existing tasks: they have no start or due dates yet. Under this rule they stay hidden until dates
-are set in OpenProject, so the manager's new tasks are the ones that start appearing.
+Submission check: a DSR entry is refused if its task would not be listed today by the same rules.
 
 Note: earlier the code deliberately ignored OpenProject dates as stale (`API_MAPPINGS.md`,
-`models.py`). Those notes are now out of date for start and due dates. Percentage done and
-estimates are still not used.
+`models.py`). Start and due dates are now used. Percentage done and estimates are still not used.
 
 "Newly assigned" marks a task as NEW. A task is NEW until the bot has shown it to the employee
 once. The bot records each (employee, work package) pair the first time it shows it.

@@ -1,30 +1,75 @@
-"""Which open tasks are scheduled for a given day, from OpenProject start and due dates.
+"""Which open tasks are listed on a given day, from OpenProject start and due dates.
 
 Rules (see docs/BUSINESS_RULES.md, "Task visibility"):
-- Closed tasks are never listed. "Closed" and "Rejected" are closed in OpenProject. The statuses
-  in COMPLETED_STATUS_IDS are also completed for this bot (QA-finished work).
-- A task without both a start date and a due date is not listed.
-- A task is listed only on days from its start date to its due date, inclusive.
-- Overdue tasks (due date passed) are not listed.
+- Completed tasks are never listed: closed in OpenProject (Closed, Rejected), or a status in
+  TaskRules.completed_status_ids (default Tested 10, Resolved 16, Passed 17).
+- A task whose start date is after the day is not listed yet.
+- Overdue tasks (due date passed) stay listed and are flagged OVERDUE, so hours can still be
+  logged on late work. TaskRules.show_overdue=False hides them instead.
+- Tasks without a start or due date stay listed and are flagged NO DATES, until management has
+  dated them. TaskRules.show_undated=False hides them instead.
 
 Pure functions; no I/O.
 """
 
+from dataclasses import dataclass
 from datetime import date
+from typing import Any, Protocol
 
-from daily_task_bot.domain.models import WorkPackage
+DEFAULT_COMPLETED_STATUS_IDS: frozenset[int] = frozenset({10, 16, 17})
+# Kept for existing imports: the default completed statuses (live OpenProject IDs).
+COMPLETED_STATUS_IDS = DEFAULT_COMPLETED_STATUS_IDS
 
-# OpenProject status IDs treated as completed by this bot: Tested (10), Resolved (16), Passed (17).
-# These are IDs from the live instance (GET /api/v3/statuses). Closed and Rejected are already
-# closed in OpenProject, so they need no entry here.
-COMPLETED_STATUS_IDS: frozenset[int] = frozenset({10, 16, 17})
-
-
-def is_completed(wp: WorkPackage) -> bool:
-    return wp.status_is_closed or (wp.status_id is not None and wp.status_id in COMPLETED_STATUS_IDS)
+OVERDUE = "OVERDUE"
+NO_DATES = "NO DATES"
 
 
-def is_scheduled_on(wp: WorkPackage, day: date) -> bool:
-    if is_completed(wp) or wp.start_date is None or wp.due_date is None:
+class _Task(Protocol):
+    status_is_closed: bool
+    status_id: int | None
+    start_date: date | None
+    due_date: date | None
+
+
+@dataclass(frozen=True)
+class TaskRules:
+    completed_status_ids: frozenset[int] = DEFAULT_COMPLETED_STATUS_IDS
+    show_overdue: bool = True
+    show_undated: bool = True
+
+    @classmethod
+    def from_settings(cls, settings: Any) -> "TaskRules":
+        return cls(
+            completed_status_ids=frozenset(settings.completed_status_ids),
+            show_overdue=settings.show_overdue_tasks,
+            show_undated=settings.show_undated_tasks,
+        )
+
+
+DEFAULT_RULES = TaskRules()
+
+
+def is_completed(wp: _Task, rules: TaskRules = DEFAULT_RULES) -> bool:
+    return wp.status_is_closed or (wp.status_id is not None and wp.status_id in rules.completed_status_ids)
+
+
+def task_flag(wp: _Task, day: date) -> str | None:
+    """OVERDUE, NO DATES, or None for a task inside its date window."""
+    if wp.start_date is None or wp.due_date is None:
+        return NO_DATES
+    if wp.due_date < day:
+        return OVERDUE
+    return None
+
+
+def is_scheduled_on(wp: _Task, day: date, rules: TaskRules = DEFAULT_RULES) -> bool:
+    if is_completed(wp, rules):
         return False
-    return wp.start_date <= day <= wp.due_date
+    if wp.start_date is not None and wp.start_date > day:
+        return False  # not started yet
+    flag = task_flag(wp, day)
+    if flag == NO_DATES:
+        return rules.show_undated
+    if flag == OVERDUE:
+        return rules.show_overdue
+    return True

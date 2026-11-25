@@ -12,7 +12,8 @@ Verified from docs/jibble_hourentry_capture_redacted.json (captured 2026-11-20):
 Deliberately NOT sent: clientType. Jibble accepted the request without it in a live test.
 
 platform IS sent, and it identifies this bot, not a browser. Jibble rejects the create with
-"The Platform field is required." without it. The values are the bot's own (approved by the TL).
+"The Platform field is required." without it. The values describe this bot: a server-side
+service on Linux, not a browser or a person's device.
 """
 
 from dataclasses import dataclass
@@ -32,7 +33,7 @@ def bot_platform() -> dict[str, Any]:
         "deviceName": "Daily Task Bot",
         "deviceModel": None,
         "clientVersion": BOT_CLIENT_VERSION,
-        "os": "Windows",
+        "os": "Linux",
     }
 
 

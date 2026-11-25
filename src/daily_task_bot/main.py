@@ -22,6 +22,7 @@ from daily_task_bot.clients.openproject import OpenProjectClient
 from daily_task_bot.config import Settings, get_settings, live_configuration_problems
 from daily_task_bot.db.engine import make_engine, make_session_factory
 from daily_task_bot.services.background import background_sync_loop
+from daily_task_bot.domain.task_window import TaskRules
 from daily_task_bot.services.daily_run import run_daily_summary
 from daily_task_bot.services.loaders import load_employees, load_holidays, load_leave
 
@@ -106,6 +107,7 @@ async def run(
                 lookback_hours=settings.gchat_lookback_hours,
                 chat_writer=chat_writer,
                 dry_run=effective_dry_run,
+                task_rules=TaskRules.from_settings(settings),
             )
     finally:
         if gchat:
