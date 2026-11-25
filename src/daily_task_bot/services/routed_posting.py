@@ -35,13 +35,20 @@ def plan_routed_posts(
     lines: Sequence[PreviewLine],
     roles_by_project: dict[int, list[str]],
     routes: Sequence[Route],
+    summaries: dict[int, str] | None = None,
 ) -> PostingPlan:
+    """summaries maps work package ID to its summary. Missing entries use the employee's own text."""
     result: RoutingResult = route_lines(lines, roles_by_project, routes)
+    summaries = summaries or {}
     posts: list[PostPlan] = []
     for space in sorted(result.grouped, key=lambda s: result.labels[s]):
         entries = result.grouped[space]
         body = [f"Daily update for {dsr_date.isoformat()} from {employee_name}:"]
-        body += [f"- #{line.work_package_id}: {line.hours} h, {line.work_done}" for line in entries]
+        body += [
+            f"- #{line.work_package_id}: {line.hours} h, "
+            f"{summaries.get(line.work_package_id, line.work_done)}"
+            for line in entries
+        ]
         posts.append(PostPlan(
             space_id=space,
             label=result.labels[space],

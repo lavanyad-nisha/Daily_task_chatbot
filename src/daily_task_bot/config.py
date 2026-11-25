@@ -1,7 +1,7 @@
 """Application settings, loaded from environment variables (prefix DTB_) or a .env file."""
 
-from functools import lru_cache
 from datetime import date
+from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     # Tasks without a start or due date stay listed (flagged NO DATES). False = hide them, once
     # management has dated all tasks in OpenProject.
     show_undated_tasks: bool = True
+
+    # Anthropic (Claude Haiku 5.5 for DSR summaries). Read from ANTHROPIC_API_KEY, not DTB_-prefixed.
+    anthropic_api_key: SecretStr | None = Field(default=None, validation_alias="ANTHROPIC_API_KEY")
 
     # Google Chat
     gchat_service_account_file: Path | None = None
