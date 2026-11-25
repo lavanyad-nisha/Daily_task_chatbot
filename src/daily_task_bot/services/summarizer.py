@@ -17,9 +17,12 @@ FALLBACK_MAX_CHARS = 300
 
 SYSTEM_PROMPT = (
     "You summarise one employee's task update for a project status channel. "
-    "Reply with one to two plain sentences in English, under 60 words. "
-    "Say what was done and the result. Use only facts from the update. "
-    "Do not mention names, IDs or hours unless the update does."
+    "Reply with one short sentence, or two at most, under 40 words, in plain English. "
+    "State only what was done and its result, using facts from the update. "
+    "Never comment on the update itself, never say what is missing or unclear, "
+    "and never mention names, IDs or hours. "
+    "Example: update 'Fixed the login null check, retested, passed.' -> "
+    "'Fixed the login null check; retest passed.'"
 )
 
 
@@ -75,8 +78,13 @@ def rule_based_summary(text: str, max_chars: int = FALLBACK_MAX_CHARS) -> str:
     return cut.rstrip(" ,;:") + "..."
 
 
+SHORT_UPDATE_WORDS = 20  # short updates are already summaries; they go unchanged
+
+
 def summarize(text: str, summarizer: Summarizer | None) -> SummaryResult:
-    """Haiku summary when available, otherwise the rule-based shortening."""
+    """Haiku summary for longer descriptions; short updates and the fallback use the rule-based text."""
+    if len(text.split()) <= SHORT_UPDATE_WORDS:
+        return SummaryResult(rule_based_summary(text), "rule_based")
     if summarizer is not None:
         try:
             return SummaryResult(summarizer.summarize(text), "haiku")

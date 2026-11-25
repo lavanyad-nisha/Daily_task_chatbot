@@ -124,3 +124,11 @@ def test_posting_uses_the_summary_and_falls_back_to_the_original_text():
     assert "#101: 2 h, Login fix passed retest." in text
     assert UPDATE not in text
     assert "#102: 1 h, Short note" in text
+
+
+def test_short_update_is_not_sent_to_the_model():
+    client, messages = fake_client(response=text_response("should not be used"))
+    result = summarize("Routing dry-run test on the scrum test task.", HaikuSummarizer(client))
+    assert result.method == "rule_based"
+    assert result.text == "Routing dry-run test on the scrum test task."
+    assert messages.calls == []
