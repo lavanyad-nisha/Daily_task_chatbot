@@ -18,10 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from daily_task_bot.config import Settings
-from daily_task_bot.db.models import Employee
-from daily_task_bot.domain.chat_commands import HELP_TEXT, parse_command
-from daily_task_bot.domain.task_window import is_scheduled_on
-from daily_task_bot.services.dsr_updates import TaskChange, apply_task_change
+from daily_task_bot.db.models import DsrEntry, DsrSubmission, Employee
 from daily_task_bot.domain.chat_cards import (
     SUBMIT_FUNCTION,
     CardTask,
@@ -29,6 +26,8 @@ from daily_task_bot.domain.chat_cards import (
     build_dsr_card,
     parse_dsr_form,
 )
+from daily_task_bot.domain.chat_commands import HELP_TEXT, parse_command
+from daily_task_bot.domain.task_window import is_completed, is_eligible
 from daily_task_bot.services.dsr import (
     DsrConflictError,
     DsrValidationError,
@@ -36,6 +35,10 @@ from daily_task_bot.services.dsr import (
     confirm_submission,
     create_draft,
 )
+from daily_task_bot.services.dsr_preview import PreviewLine, build_preview_text
+from daily_task_bot.services.dsr_updates import TaskChange, apply_task_change
+from daily_task_bot.services.openproject_time_sync import push_status_now
+from daily_task_bot.services.routing_sync import load_routes, roles_by_project
 
 CHAT_ISSUER = "chat@system.gserviceaccount.com"
 
@@ -72,13 +75,13 @@ def find_employee(session: Session, event: dict[str, Any]) -> Employee | None:
 
 
 async def open_tasks_for(op_client: Any, employee: Employee, settings: Settings, today: date) -> list[CardTask]:
-    """Tasks for the DSR card and TASKS: open, assigned to the employee, and scheduled for today."""
+    """Tasks for the DSR card and TASKS: every open task assigned to the employee, on any date."""
     statuses = await op_client.get_statuses()
     packages = await op_client.get_open_work_packages(statuses, settings.openproject_project_ids or None)
     return [
         CardTask(wp.id, wp.subject, wp.status_name)
         for wp in sorted(packages, key=lambda w: w.id)
-        if wp.assignee_id == employee.openproject_user_id and is_scheduled_on(wp, today)
+        if wp.assignee_id == employee.openproject_user_id and is_eligible(wp)
     ]
 
 
@@ -97,6 +100,69 @@ async def dsr_card_for(session: Session, op_client: Any, settings: Settings, emp
     )
 
 
+async def preview_text_for(session: Session, op_client: Any, employee: Employee, today: date) -> str:
+    """Where today's saved entries would be routed. Reads only; nothing is sent or written."""
+    submission = session.scalar(select(DsrSubmission).where(
+        DsrSubmission.employee_id == employee.id,
+        DsrSubmission.dsr_date == today,
+        DsrSubmission.is_current.is_(True),
+    ))
+    if submission is None:
+        return f"No entries saved for {today.isoformat()} yet."
+    entries = session.scalars(select(DsrEntry).where(DsrEntry.submission_id == submission.id)
+                              .order_by(DsrEntry.id)).all()
+    statuses = await op_client.get_statuses()
+    lines: list[PreviewLine] = []
+    for entry in entries:
+        detail = await op_client.get_work_package(entry.work_package_id, statuses)
+        if detail is None:
+            lines.append(PreviewLine(entry.work_package_id, None, entry.hours_spent, entry.work_done,
+                                     note="work package not visible in OpenProject"))
+        else:
+            lines.append(PreviewLine(entry.work_package_id, detail.project_id,
+                                     entry.hours_spent, entry.work_done))
+    return build_preview_text(
+        dsr_date=today, lines=lines,
+        roles_by_project=roles_by_project(session, employee.id),
+        routes=load_routes(session),
+    )
+
+
+def immediate_status_enabled(settings: Settings) -> bool:
+    """A STATUS change goes to OpenProject at once only when live writes are on (not dry run)."""
+    return settings.allow_external_writes and not settings.dry_run
+
+
+async def _push_status_for(session: Session, op_client: Any, settings: Settings, employee: Employee,
+                           today: date, work_package_id: int, now: datetime) -> str | None:
+    """Push today's status change for one task now. None when there is nothing to push."""
+    entry = session.scalar(select(DsrEntry).join(DsrSubmission).where(
+        DsrSubmission.employee_id == employee.id,
+        DsrSubmission.dsr_date == today,
+        DsrSubmission.is_current.is_(True),
+        DsrEntry.work_package_id == work_package_id,
+    ))
+    if entry is None or entry.new_status_id is None:
+        return None
+    statuses = await op_client.get_statuses()
+    result = await push_status_now(
+        session, entry=entry, client=op_client, statuses=statuses,
+        status_choices=frozenset(settings.dsr_status_choices), now=now,
+    )
+    if result is None:
+        return None
+    task = f"#{work_package_id}"
+    if result.action in ("updated", "reused"):
+        return f"Updated in OpenProject: {task} is now status {entry.new_status_id}."
+    if result.action == "retry_wait":
+        return f"Saved. OpenProject was unavailable, so {task} will be retried automatically."
+    if result.action == "needs_review":
+        return f"Saved, but {task} needs review in OpenProject: {result.detail}"
+    if result.action == "failed_permanent":
+        return f"Saved, but OpenProject did not accept the status for {task}: {result.detail}"
+    return f"Saved. Status for {task}: {result.action}."
+
+
 def _text(message: str) -> dict[str, Any]:
     return {"text": message}
 
@@ -112,8 +178,8 @@ async def _validate_tasks(op_client: Any, employee: Employee, work_package_ids: 
             problems.append(f"#{wp_id} is closed")
         elif detail.assignee_id != employee.openproject_user_id:
             problems.append(f"#{wp_id} is not assigned to you")
-        elif not is_scheduled_on(detail, today):
-            problems.append(f"#{wp_id} is not scheduled for today")
+        elif is_completed(detail):
+            problems.append(f"#{wp_id} is already completed")
     return problems
 
 
@@ -147,6 +213,8 @@ async def handle_chat_event(
             return await dsr_card_for(session, op_client, settings, employee, today)
         if command.name == "HELP":
             return _text(HELP_TEXT)
+        if command.name == "PREVIEW":
+            return _text(await preview_text_for(session, op_client, employee, today))
         tasks = await open_tasks_for(op_client, employee, settings, today)
         if command.name == "TASKS":
             if not tasks:
@@ -168,6 +236,11 @@ async def handle_chat_event(
                 allowed_status_ids=frozenset(settings.dsr_status_choices),
                 go_live=settings.dsr_go_live_date, now=now or datetime.now(),
             )
+            if command.name == "STATUS" and immediate_status_enabled(settings):
+                pushed = await _push_status_for(session, op_client, settings, employee, today,
+                                                wp_id, now or datetime.now())
+                if pushed is not None:
+                    return _text(pushed)
             return _text(message)
         return _text(HELP_TEXT)
 

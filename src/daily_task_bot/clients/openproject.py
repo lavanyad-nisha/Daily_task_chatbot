@@ -56,6 +56,25 @@ def _parse_date(value: str | None) -> date | None:
         return None
 
 
+def _membership_from_element(element: dict[str, Any]) -> "MembershipRecord | None":
+    """Read one membership. None for group principals or when the project or user is unknown."""
+    links = element.get("_links", {})
+    principal_href = links.get("principal", {}).get("href") or ""
+    if "/users/" not in principal_href:
+        return None
+    project_id = _id_from_href(links.get("project", {}).get("href"))
+    user_id = _id_from_href(principal_href)
+    if project_id is None or user_id is None:
+        return None
+    roles = [r.get("name") for r in element.get("_embedded", {}).get("roles", [])
+             if isinstance(r, dict) and r.get("name")]
+    if not roles:
+        roles = [r.get("title") for r in links.get("roles", [])
+                 if isinstance(r, dict) and r.get("title")]
+    return MembershipRecord(project_id=project_id, user_id=user_id,
+                            role_names=tuple(sorted({r.strip() for r in roles if r.strip()})))
+
+
 @dataclass(frozen=True)
 class TimeEntrySnapshot:
     """A read-only view of an existing OpenProject time entry."""
@@ -101,6 +120,16 @@ class WorkPackageDetail:
     can_update: bool = False
     start_date: date | None = None
     due_date: date | None = None
+    project_id: int | None = None
+
+
+@dataclass(frozen=True)
+class MembershipRecord:
+    """One user's membership on one project, with the role names they hold there."""
+
+    project_id: int
+    user_id: int
+    role_names: tuple[str, ...]
 
 
 class OpenProjectClient:
@@ -193,6 +222,7 @@ class OpenProjectClient:
             can_update="updateImmediately" in links,
             start_date=_parse_date(data.get("startDate")),
             due_date=_parse_date(data.get("dueDate")),
+            project_id=_id_from_href(links.get("project", {}).get("href")),
         )
 
     async def get_allowed_status_ids(self, work_package_id: int, *, lock_version: int) -> set[int]:
@@ -291,6 +321,7 @@ class OpenProjectClient:
             id=element["id"],
             subject=element.get("subject", ""),
             project_name=project.get("name"),
+            project_id=_id_from_href(links.get("project", {}).get("href")),
             status_name=status_name,
             status_is_closed=is_closed,
             priority_name=priority.get("name"),
@@ -299,6 +330,28 @@ class OpenProjectClient:
             start_date=_parse_date(element.get("startDate")),
             due_date=_parse_date(element.get("dueDate")),
         )
+
+    async def list_user_memberships(self) -> list[MembershipRecord]:
+        """GET /api/v3/memberships, all pages. Read-only. User principals only (groups are skipped).
+
+        Roles come from the embedded role names when OpenProject sends them, otherwise from the
+        role link titles. A membership with no role names is returned with an empty tuple.
+        """
+        results: list[MembershipRecord] = []
+        page = 1
+        while True:
+            data = await self._get(
+                "/api/v3/memberships", params={"pageSize": PAGE_SIZE, "offset": page}
+            )
+            elements = data.get("_embedded", {}).get("elements", [])
+            for element in elements:
+                record = _membership_from_element(element)
+                if record is not None:
+                    results.append(record)
+            if not elements or page * PAGE_SIZE >= data.get("total", 0):
+                break
+            page += 1
+        return results
 
     async def list_time_entries(self, filters: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """GET /api/v3/time_entries with the given filters, following all pages. Read-only."""

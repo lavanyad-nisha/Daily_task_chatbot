@@ -1,11 +1,12 @@
-"""Which open tasks are scheduled for a given day, from OpenProject start and due dates.
+"""Which OpenProject tasks an employee can see and update, and which are due for a reminder.
 
 Rules (see docs/BUSINESS_RULES.md, "Task visibility"):
-- Closed tasks are never listed. "Closed" and "Rejected" are closed in OpenProject. The statuses
-  in COMPLETED_STATUS_IDS are also completed for this bot (QA-finished work).
-- A task without both a start date and a due date is not listed.
-- A task is listed only on days from its start date to its due date, inclusive.
-- Overdue tasks (due date passed) are not listed.
+- Completed tasks are never listed or updated. "Closed" and "Rejected" are closed in OpenProject.
+  The statuses in COMPLETED_STATUS_IDS are also completed for this bot (QA-finished work).
+- Eligible for update: assigned to the employee and not completed, on any date. Start and due
+  dates do not limit updates.
+- Due for a reminder: eligible and due on that day (due date equals the day, Asia/Kolkata).
+  Reminders do not list tasks due on other days.
 
 Pure functions; no I/O.
 """
@@ -24,7 +25,11 @@ def is_completed(wp: WorkPackage) -> bool:
     return wp.status_is_closed or (wp.status_id is not None and wp.status_id in COMPLETED_STATUS_IDS)
 
 
-def is_scheduled_on(wp: WorkPackage, day: date) -> bool:
-    if is_completed(wp) or wp.start_date is None or wp.due_date is None:
-        return False
-    return wp.start_date <= day <= wp.due_date
+def is_eligible(wp: WorkPackage) -> bool:
+    """Open and not completed. The caller checks the assignee."""
+    return not is_completed(wp)
+
+
+def is_due_on(wp: WorkPackage, day: date) -> bool:
+    """Eligible and due on this day. Used for reminders only."""
+    return is_eligible(wp) and wp.due_date == day

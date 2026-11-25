@@ -7,6 +7,7 @@ Only these commands are accepted. Anything else gets the help text, so the bot n
   TASKS                        list your open tasks with numbers
   UPDATE <task> <hours> <work> record or change hours and work done for a task
   STATUS <task> <status id>    set the status for a task (from the approved list)
+  PREVIEW                      show where today's saved entries would be routed
 """
 
 from dataclasses import dataclass, field
@@ -19,6 +20,7 @@ HELP_TEXT = (
     "UPDATE <task> <hours> <work done> - record or change a task's hours and work\n"
     "STATUS <task> <status id> - set a task's status\n"
     "DSR - open today's status form\n"
+    "PREVIEW - show where today's saved entries would be routed\n"
     "HELP - show this list"
 )
 
@@ -36,7 +38,7 @@ def parse_command(text: str) -> Command:
         return Command("HELP")
     word = parts[0].upper()
 
-    if word in ("HELP", "DSR", "TASKS"):
+    if word in ("HELP", "DSR", "TASKS", "PREVIEW"):
         return Command(word)
 
     if word == "UPDATE":

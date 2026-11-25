@@ -262,3 +262,38 @@ class ExternalSyncRecord(TimestampMixin, Base):
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     entry: Mapped[DsrEntry] = relationship(back_populates="sync_records")
+
+
+class EmployeeProjectRole(TimestampMixin, Base):
+    """An employee's OpenProject role on one project. Refreshed from memberships (read-only)."""
+
+    __tablename__ = "employee_project_roles"
+    __table_args__ = (
+        UniqueConstraint("employee_id", "openproject_project_id", "role_name",
+                         name="uq_employee_project_role"),
+        CheckConstraint("length(trim(role_name)) > 0", name="role_name_not_blank"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id", ondelete="CASCADE"))
+    openproject_project_id: Mapped[int] = mapped_column(Integer)
+    role_name: Mapped[str] = mapped_column(String(100))
+    synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ProjectRoute(TimestampMixin, Base):
+    """Which Chat space receives a project's content for one role on that project."""
+
+    __tablename__ = "project_routes"
+    __table_args__ = (
+        UniqueConstraint("openproject_project_id", "role_name", name="uq_project_routes_project_role"),
+        CheckConstraint("chat_space_id LIKE 'spaces/%'", name="space_id_format"),
+        CheckConstraint("length(trim(role_name)) > 0", name="route_role_not_blank"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    openproject_project_id: Mapped[int] = mapped_column(Integer)
+    role_name: Mapped[str] = mapped_column(String(100))
+    chat_space_id: Mapped[str] = mapped_column(String(100))
+    space_label: Mapped[str | None] = mapped_column(String(100))
+    is_active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
