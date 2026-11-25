@@ -53,17 +53,25 @@ def test_batch_envelope_matches_the_captured_request_structure():
     assert item["headers"] == {"odata-version": "4.0"}
 
 
-def test_body_has_only_the_verified_fields_and_no_claimed_device():
+def test_body_has_the_verified_fields_and_the_bot_platform():
     body = build_hour_entry_batch(base_url=BASE, **KWARGS)["requests"][0]["body"]
     assert body == {"personId": "PERSON-1", "date": "2026-11-20", "duration": "PT2H",
                     "activityId": "ACTIVITY-1", "id": "ENTRY-1", "note": "DTB integration test",
-                    "projectId": "PROJECT-1"}
+                    "projectId": "PROJECT-1",
+                    "platform": {"deviceName": "Daily Task Bot", "deviceModel": None,
+                                 "clientVersion": "0.1.0", "os": "Linux"}}
 
 
-def test_only_the_two_unclaimed_captured_fields_are_left_out():
+def test_platform_describes_the_bot_not_a_browser():
+    platform = build_hour_entry_batch(base_url=BASE, **KWARGS)["requests"][0]["body"]["platform"]
+    text = " ".join(str(v) for v in platform.values()).lower()
+    assert "chrome" not in text and "browser" not in text
+
+
+def test_only_clientType_is_left_out_of_the_captured_fields():
     captured = set(CAPTURE["request"]["body"]["requests"][0]["body"].keys())
     built = set(build_hour_entry_batch(base_url=BASE, **KWARGS)["requests"][0]["body"].keys())
-    assert captured - built == {"clientType", "platform"}
+    assert captured - built == {"clientType"}
 
 
 @pytest.mark.parametrize("override", [{"entry_id": ""}, {"person_id": ""}, {"note": "   "}])

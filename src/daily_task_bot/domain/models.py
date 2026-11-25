@@ -15,8 +15,12 @@ class WorkPackage(BaseModel):
     status_is_closed: bool
     priority_name: str | None = None
     assignee_id: int | None = None
-    # Dates, estimates and completion % are deliberately not modelled: the OpenProject values
-    # are stale, so they must not drive summaries or the DSR form.
+    status_id: int | None = None
+    # Start and due dates set by management in OpenProject. They decide which tasks are listed
+    # on a given day (see domain/task_window.py).
+    start_date: date | None = None
+    due_date: date | None = None
+    # Estimates and completion % are still not modelled: those OpenProject values are stale.
 
 
 class ChatMessage(BaseModel):

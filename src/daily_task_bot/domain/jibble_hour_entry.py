@@ -9,8 +9,11 @@ Verified from docs/jibble_hourentry_capture_redacted.json (captured 2026-11-20):
   status 201 and the created entry in its body, including id, personId, date, duration,
   projectId, activityId, note, isLocked and status.
 
-Deliberately NOT sent: clientType and platform. The capture shows values for a browser
-(Chrome/Windows). The metadata marks them optional, and this bot must not claim them.
+Deliberately NOT sent: clientType. Jibble accepted the request without it in a live test.
+
+platform IS sent, and it identifies this bot, not a browser. Jibble rejects the create with
+"The Platform field is required." without it. The values describe this bot: a server-side
+service on Linux, not a browser or a person's device.
 """
 
 from dataclasses import dataclass
@@ -21,6 +24,17 @@ from typing import Any
 BATCH_REQUEST_ID = "r1"
 BATCH_ATOMICITY_GROUP = "ag1"
 ODATA_VERSION = "4.0"
+BOT_CLIENT_VERSION = "0.1.0"  # matches pyproject.toml
+
+
+def bot_platform() -> dict[str, Any]:
+    """The platform object Jibble requires. Describes this bot; never a browser."""
+    return {
+        "deviceName": "Daily Task Bot",
+        "deviceModel": None,
+        "clientVersion": BOT_CLIENT_VERSION,
+        "os": "Linux",
+    }
 
 
 class HourEntryResponseError(Exception):
@@ -99,6 +113,7 @@ def build_hour_entry_batch(
                     "id": entry_id,
                     "note": text,
                     "projectId": project_id,
+                    "platform": bot_platform(),
                 },
                 "method": "POST",
             }
