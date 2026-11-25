@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from daily_task_bot.config import Settings
 from daily_task_bot.db.models import DsrSubmission, Employee, ReminderSent
-from daily_task_bot.domain.task_window import is_due_on
+from daily_task_bot.domain.task_window import TaskRules, is_due_on
 from daily_task_bot.services.chat_events import dsr_card_for, local_today
 from daily_task_bot.services.next_day import (
     build_next_day_plan,
@@ -73,7 +73,7 @@ async def send_morning_plans(session_factory: sessionmaker, settings: Settings, 
             try:
                 previous_day, previous = load_previous_entries(session, employee.id, today)
                 mine = [w for w in packages
-                        if w.assignee_id == employee.openproject_user_id and is_due_on(w, today)]
+                        if w.assignee_id == employee.openproject_user_id and is_due_on(w, today, TaskRules.from_settings(settings))]
                 plan = build_next_day_plan(run_date=today, open_assignments=mine,
                                            previous_dsr_date=previous_day, previous_entries=previous,
                                            status_names={sid: st.name for sid, st in statuses.items()})

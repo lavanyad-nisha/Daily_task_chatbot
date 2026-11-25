@@ -48,9 +48,11 @@ the employee. Future-dated and overdue tasks are accepted.
 
 Tasks without a due date are not reminded, but they stay eligible for updates.
 
+`DTB_SHOW_OVERDUE_TASKS` and `DTB_SHOW_UNDATED_TASKS` no longer hide tasks under the revised
+scope. Overdue and undated tasks stay updatable, and reminders still list only tasks due today.
+
 Note: earlier the code deliberately ignored OpenProject dates as stale (`API_MAPPINGS.md`,
-`models.py`). Those notes are now out of date for start and due dates. Percentage done and
-estimates are still not used.
+`models.py`). Start and due dates are now used. Percentage done and estimates are still not used.
 
 "Newly assigned" marks a task as NEW. A task is NEW until the bot has shown it to the employee
 once. The bot records each (employee, work package) pair the first time it shows it.

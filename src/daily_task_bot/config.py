@@ -22,6 +22,14 @@ class Settings(BaseSettings):
     dsr_status_choices: list[int] = Field(default_factory=list)
     # Forward-only go-live: only DSRs dated on or after this day are synced. Unset = nothing syncs.
     dsr_go_live_date: date | None = None
+    # Task visibility (domain/task_window.py). Completed = closed in OpenProject or one of these
+    # status IDs (live IDs: Tested 10, Resolved 16, Passed 17).
+    completed_status_ids: list[int] = Field(default_factory=lambda: [10, 16, 17])
+    # Overdue tasks stay listed (flagged OVERDUE) so late work can still be logged. False = hide.
+    show_overdue_tasks: bool = True
+    # Tasks without a start or due date stay listed (flagged NO DATES). False = hide them, once
+    # management has dated all tasks in OpenProject.
+    show_undated_tasks: bool = True
 
     # Google Chat
     gchat_service_account_file: Path | None = None
@@ -45,6 +53,10 @@ class Settings(BaseSettings):
     # Google Chat inbound events. The audience must equal the endpoint URL configured in the
     # Chat app. Unset = every inbound event is refused.
     chat_endpoint_audience: str | None = None
+    # Chat app built as a Workspace add-on: the project's add-on service account that signs
+    # requests, service-<PROJECT_NUMBER>@gcp-sa-gsuiteaddons.iam.gserviceaccount.com.
+    # Unset = add-on tokens are refused.
+    chat_addon_service_account: str | None = None
     # Local times (HH:MM) for the morning plan and the evening DSR reminder.
     morning_send_time: str = "09:30"
     # Pilot: the only Chat user IDs that receive reminders or may submit a DSR. Empty = nobody.

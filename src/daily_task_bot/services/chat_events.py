@@ -9,6 +9,7 @@ Security:
   whole submission is refused and nothing is saved.
 """
 
+import logging
 from datetime import date, datetime
 from typing import Any
 
@@ -27,7 +28,7 @@ from daily_task_bot.domain.chat_cards import (
     parse_dsr_form,
 )
 from daily_task_bot.domain.chat_commands import HELP_TEXT, parse_command
-from daily_task_bot.domain.task_window import is_completed, is_eligible
+from daily_task_bot.domain.task_window import TaskRules, is_completed, is_eligible, task_flag
 from daily_task_bot.services.dsr import (
     DsrConflictError,
     DsrValidationError,
@@ -41,23 +42,33 @@ from daily_task_bot.services.openproject_time_sync import push_status_now
 from daily_task_bot.services.routing_sync import load_routes, roles_by_project
 
 CHAT_ISSUER = "chat@system.gserviceaccount.com"
+log = logging.getLogger("uvicorn.error")
 
 
 class ChatAuthError(Exception):
     """The request did not carry a valid Google Chat token for this endpoint."""
 
 
-def verify_chat_token(token: str, audience: str | None) -> dict[str, Any]:
-    """Verify a Google-signed token from Chat. Raises ChatAuthError on any problem."""
+def verify_chat_token(token: str, audience: str | None,
+                      addon_service_account: str | None = None) -> dict[str, Any]:
+    """Verify a Google-signed token from Chat. Raises ChatAuthError on any problem.
+
+    Accepted signers: Google Chat itself (plain Chat apps), or this project's own Workspace
+    add-on service account (Chat apps built as add-ons). Any other signer is refused, even with
+    the right audience, because another project's add-on could point at this URL.
+    """
     if not audience:
         raise ChatAuthError("endpoint audience is not configured")
     try:
         claims = id_token.verify_oauth2_token(token, google_requests.Request(), audience=audience)
     except Exception as exc:  # signature, audience or expiry failure
         raise ChatAuthError(type(exc).__name__) from exc
-    if claims.get("iss") != CHAT_ISSUER and claims.get("email") != CHAT_ISSUER:
-        raise ChatAuthError("token was not issued to Google Chat")
-    return claims
+    if claims.get("iss") == CHAT_ISSUER or claims.get("email") == CHAT_ISSUER:
+        return claims
+    if (addon_service_account and claims.get("email") == addon_service_account
+            and claims.get("email_verified") is True):
+        return claims
+    raise ChatAuthError("token was not issued to Google Chat or this project's add-on")
 
 
 def local_today(settings: Settings, now: datetime | None = None) -> date:
@@ -67,22 +78,46 @@ def local_today(settings: Settings, now: datetime | None = None) -> date:
 
 
 def find_employee(session: Session, event: dict[str, Any]) -> Employee | None:
+    """Find the employee by Chat user ID, or link them once by their Google-verified email.
+
+    The event body is trusted only after the Google-signed token was verified. The email link is
+    made only when that employee has no Chat user ID yet, so an existing link is never replaced.
+    """
     user = event.get("user") or {}
     chat_user = user.get("name")
     if not chat_user:
         return None
-    return session.scalar(select(Employee).where(Employee.chat_user_id == chat_user, Employee.is_active.is_(True)))
+    employee = session.scalar(
+        select(Employee).where(Employee.chat_user_id == chat_user, Employee.is_active.is_(True)))
+    if employee is not None:
+        return employee
+    email = str(user.get("email") or "").strip().lower()
+    if not email:
+        return None
+    employee = session.scalar(
+        select(Employee).where(Employee.email == email, Employee.is_active.is_(True)))
+    if employee is None or employee.chat_user_id is not None:
+        return None
+    employee.chat_user_id = chat_user
+    session.flush()
+    return employee
 
 
 async def open_tasks_for(op_client: Any, employee: Employee, settings: Settings, today: date) -> list[CardTask]:
     """Tasks for the DSR card and TASKS: every open task assigned to the employee, on any date."""
     statuses = await op_client.get_statuses()
     packages = await op_client.get_open_work_packages(statuses, settings.openproject_project_ids or None)
+    rules = TaskRules.from_settings(settings)
     return [
-        CardTask(wp.id, wp.subject, wp.status_name)
+        CardTask(wp.id, wp.subject, _status_label(wp, today))
         for wp in sorted(packages, key=lambda w: w.id)
-        if wp.assignee_id == employee.openproject_user_id and is_eligible(wp)
+        if wp.assignee_id == employee.openproject_user_id and is_eligible(wp, rules)
     ]
+
+
+def _status_label(wp: Any, today: date) -> str:
+    flag = task_flag(wp, today)
+    return f"{wp.status_name}, {flag}" if flag else wp.status_name
 
 
 async def status_choices_for(op_client: Any, settings: Settings) -> list[StatusChoice]:
@@ -167,7 +202,9 @@ def _text(message: str) -> dict[str, Any]:
     return {"text": message}
 
 
-async def _validate_tasks(op_client: Any, employee: Employee, work_package_ids: list[int], today: date) -> list[str]:
+async def _validate_tasks(op_client: Any, employee: Employee, work_package_ids: list[int], today: date,
+                         rules: TaskRules | None = None) -> list[str]:
+    rules = rules or TaskRules()
     statuses = await op_client.get_statuses()
     problems: list[str] = []
     for wp_id in work_package_ids:
@@ -178,7 +215,7 @@ async def _validate_tasks(op_client: Any, employee: Employee, work_package_ids: 
             problems.append(f"#{wp_id} is closed")
         elif detail.assignee_id != employee.openproject_user_id:
             problems.append(f"#{wp_id} is not assigned to you")
-        elif is_completed(detail):
+        elif is_completed(detail, rules):
             problems.append(f"#{wp_id} is already completed")
     return problems
 
@@ -201,8 +238,11 @@ async def handle_chat_event(
 
     employee = find_employee(session, event)
     if employee is not None and employee.chat_user_id not in set(settings.pilot_chat_user_ids):
+        log.info("chat user not in pilot list: %s (%s)", employee.chat_user_id, employee.email)
         return _text("The DSR bot is not enabled for your account yet.")
     if employee is None:
+        user = event.get("user") or {}
+        log.info("chat user not linked: %s (%s)", user.get("name"), user.get("email"))
         return _text("Your Chat account is not linked to a task profile. Please contact your administrator.")
 
     if kind == "MESSAGE":
@@ -218,7 +258,8 @@ async def handle_chat_event(
         tasks = await open_tasks_for(op_client, employee, settings, today)
         if command.name == "TASKS":
             if not tasks:
-                return _text("You have no open assigned tasks.")
+                return _text("You have no open tasks for today. A task shows up here when it is assigned to "
+                             "you in OpenProject, not completed, and its start date has come.")
             lines = [f"{i}. #{t.work_package_id} {t.subject} ({t.status_name})"
                      for i, t in enumerate(tasks, start=1)]
             return _text("Your open tasks:\n" + "\n".join(lines))
@@ -256,7 +297,8 @@ async def handle_chat_event(
             return _text("Please fix these and submit again: " + "; ".join(parsed.errors))
         if not parsed.entries:
             return _text("No hours were entered, so nothing was recorded.")
-        problems = await _validate_tasks(op_client, employee, [e.work_package_id for e in parsed.entries], today)
+        problems = await _validate_tasks(op_client, employee, [e.work_package_id for e in parsed.entries], today,
+                                        TaskRules.from_settings(settings))
         if problems:
             return _text("Nothing was recorded. " + "; ".join(problems))
         try:
