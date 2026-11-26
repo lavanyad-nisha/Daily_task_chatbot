@@ -93,7 +93,7 @@ def _employee(session):
 
 
 def _say(session, text, op=None):
-    event = {"type": "MESSAGE", "user": {"name": CHAT_USER}, "message": {"text": text}}
+    event = {"type": "MESSAGE", "space": {"name": "spaces/DM1", "spaceType": "DIRECT_MESSAGE"}, "user": {"name": CHAT_USER}, "message": {"text": text}}
     return asyncio.run(handle_chat_event(event, session=session, op_client=op or FakeOpenProject(),
                                          settings=_settings(), now=NOW))["text"]
 
