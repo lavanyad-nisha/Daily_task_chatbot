@@ -144,13 +144,13 @@ def _handle(session, event, op=None, settings=None):
 
 def test_message_containing_dsr_returns_todays_card(session):
     _employee(session)
-    body = _handle(session, {"type": "MESSAGE", "user": {"name": CHAT_USER},
+    body = _handle(session, {"type": "MESSAGE", "space": {"name": "spaces/DM1", "spaceType": "DIRECT_MESSAGE"}, "user": {"name": CHAT_USER},
                              "message": {"text": "DSR please"}})
     assert "cardsV2" in body
 
 
 def test_unknown_chat_user_is_refused_without_details(session):
-    body = _handle(session, {"type": "MESSAGE", "user": {"name": "users/999"}, "message": {"text": "dsr"}})
+    body = _handle(session, {"type": "MESSAGE", "space": {"name": "spaces/DM1", "spaceType": "DIRECT_MESSAGE"}, "user": {"name": "users/999"}, "message": {"text": "dsr"}})
     assert "not linked" in body["text"] and "users/999" not in body["text"]
 
 
@@ -236,7 +236,7 @@ def test_reminders_do_nothing_while_external_writes_are_disabled():
 
 def test_employee_outside_the_pilot_is_not_served(session):
     _employee(session, chat="users/888")
-    body = _handle(session, {"type": "MESSAGE", "user": {"name": "users/888"}, "message": {"text": "dsr"}})
+    body = _handle(session, {"type": "MESSAGE", "space": {"name": "spaces/DM1", "spaceType": "DIRECT_MESSAGE"}, "user": {"name": "users/888"}, "message": {"text": "dsr"}})
     assert "not enabled" in body["text"]
 
 

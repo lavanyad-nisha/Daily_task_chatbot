@@ -54,7 +54,7 @@ def _settings(**overrides):
 
 
 def _event(text):
-    return {"type": "MESSAGE", "user": {"name": CHAT_USER}, "message": {"text": text}}
+    return {"type": "MESSAGE", "space": {"name": "spaces/DM1", "spaceType": "DIRECT_MESSAGE"}, "user": {"name": CHAT_USER}, "message": {"text": text}}
 
 
 async def _hours_then_status(session, op, settings, status_id):

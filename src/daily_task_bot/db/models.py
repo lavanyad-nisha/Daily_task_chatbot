@@ -313,3 +313,21 @@ class RoutedPost(TimestampMixin, Base):
     post_date: Mapped[date] = mapped_column(Date)
     message_name: Mapped[str | None] = mapped_column(String(200))
     sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SpaceLink(TimestampMixin, Base):
+    """Which client a Chat space belongs to. One client per space and one space per client;
+    an unlinked space gets nothing."""
+
+    __tablename__ = "space_links"
+    __table_args__ = (
+        CheckConstraint("length(trim(client_name)) > 0", name="client_name_not_blank"),
+        UniqueConstraint("client_name", name="uq_space_links_client_name"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    space_id: Mapped[str] = mapped_column(String(100), unique=True)
+    client_name: Mapped[str] = mapped_column(String(100))
+    # The client's OpenProject parent project (sub-projects are resolved from it in T2).
+    openproject_project_id: Mapped[int | None] = mapped_column(Integer)
+    linked_by: Mapped[str] = mapped_column(String(100))

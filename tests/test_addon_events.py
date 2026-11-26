@@ -190,7 +190,7 @@ def teardown_function():
 def test_endpoint_answers_addon_event_in_addon_format(monkeypatch):
     client = _client(monkeypatch, {"email": ADDON_SA, "email_verified": True})
     response = client.post("/chat", headers={"Authorization": "Bearer t"},
-                           json=_addon({"messagePayload": {"message": {"text": "help"}}}))
+                           json=_addon({"messagePayload": {"message": {"text": "help"}, "space": {"name": "spaces/DM1", "spaceType": "DIRECT_MESSAGE"}}}))
     assert response.status_code == 200
     text = response.json()["hostAppDataAction"]["chatDataAction"]["createMessageAction"]["message"]["text"]
     assert "not linked" in text
@@ -199,7 +199,7 @@ def test_endpoint_answers_addon_event_in_addon_format(monkeypatch):
 def test_endpoint_refuses_foreign_signer(monkeypatch):
     client = _client(monkeypatch, {"email": "someone@example.com", "email_verified": True})
     response = client.post("/chat", headers={"Authorization": "Bearer t"},
-                           json=_addon({"messagePayload": {"message": {"text": "help"}}}))
+                           json=_addon({"messagePayload": {"message": {"text": "help"}, "space": {"name": "spaces/DM1", "spaceType": "DIRECT_MESSAGE"}}}))
     assert response.status_code == 401
 
 

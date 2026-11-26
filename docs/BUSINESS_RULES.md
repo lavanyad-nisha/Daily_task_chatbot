@@ -101,3 +101,12 @@ and NEW-then-seen cases.
 - **Flagged entries are held for review.** They do not stop routed entries.
 - **`PREVIEW` shows the routing** of today's saved entries, grouped by space. It sends nothing.
 - Posting is still as the bot. Posting as the employee is not built.
+
+## Client spaces (T1; tests in `tests/test_space_links.py`)
+
+- A Chat space is linked to one client, and a client to one space (`space_links`). An unlinked space gets nothing.
+- In a space the bot must be @mentioned; commands are read from `message.argumentText` (text without the mention).
+- `LINK <client>` and `UNLINK`: only users in `DTB_BOT_ADMIN_CHAT_USER_IDS`, only inside a space. `LINKED`: anyone in the space.
+- Clients and their OpenProject parent project come from `DTB_CLIENTS`; the project ID is stored with the link.
+- TASKS, DSR, PREVIEW, UPDATE and STATUS are refused in spaces. A chat counts as private only when Chat says it is a
+  direct message (`spaceType` DIRECT_MESSAGE, `type` DM or `singleUserBotDm`); if the type is missing it is treated as a space.

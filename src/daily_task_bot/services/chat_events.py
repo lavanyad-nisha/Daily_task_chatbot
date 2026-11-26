@@ -40,6 +40,7 @@ from daily_task_bot.services.dsr_preview import PreviewLine, build_preview_text
 from daily_task_bot.services.dsr_updates import TaskChange, apply_task_change
 from daily_task_bot.services.openproject_time_sync import push_status_now
 from daily_task_bot.services.routing_sync import load_routes, roles_by_project
+from daily_task_bot.services.space_links import describe_link, link_space, unlink_space
 
 CHAT_ISSUER = "chat@system.gserviceaccount.com"
 log = logging.getLogger("uvicorn.error")
@@ -198,6 +199,73 @@ async def _push_status_for(session: Session, op_client: Any, settings: Settings,
     return f"Saved. Status for {task}: {result.action}."
 
 
+PRIVATE_ONLY_COMMANDS = frozenset({"TASKS", "DSR", "PREVIEW", "UPDATE", "STATUS"})
+SPACE_ADMIN_COMMANDS = frozenset({"LINK", "UNLINK"})
+SPACE_COMMANDS = SPACE_ADMIN_COMMANDS | {"LINKED"}
+
+
+def message_text(event: dict[str, Any]) -> str:
+    """The command text without the bot @mention.
+
+    In a space the message must @mention the bot, and message.text then starts with
+    "@Daily Task Bot". Chat puts the text without the mention in message.argumentText.
+    """
+    message = event.get("message") or {}
+    argument_text = message.get("argumentText")
+    if isinstance(argument_text, str) and argument_text.strip():
+        return argument_text.strip()
+    return (message.get("text") or "").strip()
+
+
+def is_private_chat(event: dict[str, Any]) -> bool:
+    """True only for a direct message with the bot.
+
+    Chat sends space.spaceType (current) and may also send the older space.type. If neither says
+    "direct message", the event is treated as a space, so private commands are refused rather than
+    showing someone's tasks to a whole space.
+    """
+    space = event.get("space") or {}
+    if space.get("spaceType") == "DIRECT_MESSAGE" or space.get("type") == "DM":
+        return True
+    if space.get("singleUserBotDm") is True:
+        return True
+    if "spaceType" not in space and "type" not in space:
+        log.warning("chat event has no space type; treating it as a space: %s", space.get("name"))
+    return False
+
+
+def _handle_space_rules(event: dict[str, Any], *, session: Session, settings: Settings) -> dict[str, Any] | None:
+    """Space linking and private-only commands. Returns a reply, or None to continue normally."""
+    text = message_text(event)
+    command = parse_command(text)
+    first_word = text.split()[0].upper() if text else ""
+
+    if is_private_chat(event):
+        if first_word in SPACE_COMMANDS:
+            return _text("LINK, UNLINK and LINKED work inside the client's Chat space, not in a private chat.")
+        return None
+
+    # Inside a Chat space
+    if first_word in SPACE_COMMANDS:
+        space_id = (event.get("space") or {}).get("name")
+        if not space_id:
+            return _text("I could not read this space's ID, so nothing was changed.")
+        if first_word == "LINKED":  # anyone in the space may check
+            return _text(describe_link(session, space_id=space_id))
+        user = (event.get("user") or {}).get("name")
+        if user not in set(settings.bot_admin_chat_user_ids):
+            return _text("Only bot admins can link or unlink this space.")
+        if command.error:
+            return _text(command.error)
+        if command.name == "LINK":
+            return _text(link_space(session, space_id=space_id, client=command.args["client"],
+                                    linked_by=user, clients=settings.clients))
+        return _text(unlink_space(session, space_id=space_id))
+    if command.name in PRIVATE_ONLY_COMMANDS:
+        return _text(f"Please message me privately to use {command.name}.")
+    return {}  # other messages in a space get no reply
+
+
 def _text(message: str) -> dict[str, Any]:
     return {"text": message}
 
@@ -233,8 +301,17 @@ async def handle_chat_event(
     today = local_today(settings, now)
 
     if kind == "ADDED_TO_SPACE":
+        if not is_private_chat(event):
+            return _text("Hi! I post updates here once this space is linked to a client. "
+                         "Ask a bot admin to type @Daily Task Bot LINK <client> here. "
+                         "For your own tasks and DSR, message me privately.")
         return _text("Hi! I send your daily task summary and collect your daily status report here. "
                      "Type DSR to open today's form.")
+
+    if kind == "MESSAGE":
+        chat_reply = _handle_space_rules(event, session=session, settings=settings)
+        if chat_reply is not None:
+            return chat_reply
 
     employee = find_employee(session, event)
     if employee is not None and employee.chat_user_id not in set(settings.pilot_chat_user_ids):
@@ -246,7 +323,7 @@ async def handle_chat_event(
         return _text("Your Chat account is not linked to a task profile. Please contact your administrator.")
 
     if kind == "MESSAGE":
-        command = parse_command((event.get("message") or {}).get("text") or "")
+        command = parse_command(message_text(event))
         if command.error:
             return _text(f"{command.error}\n\n{HELP_TEXT}")
         if command.name == "DSR":
