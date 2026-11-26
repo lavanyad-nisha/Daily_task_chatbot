@@ -41,6 +41,15 @@ def parse_command(text: str) -> Command:
     if word in ("HELP", "DSR", "TASKS", "PREVIEW"):
         return Command(word)
 
+    if word in ("UNLINK", "LINKED"):
+        return Command(word)
+
+    if word == "LINK":
+        client = " ".join(parts[1:]).strip()
+        if not client:
+            return Command("ERROR", error="Use: LINK <client>")
+        return Command("LINK", {"client": client})
+
     if word == "UPDATE":
         if len(parts) < 4:
             return Command("ERROR", error="Use: UPDATE <task> <hours> <work done>")

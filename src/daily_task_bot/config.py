@@ -59,6 +59,10 @@ class Settings(BaseSettings):
     morning_send_time: str = "09:30"
     # Pilot: the only Chat user IDs that receive reminders or may submit a DSR. Empty = nobody.
     pilot_chat_user_ids: list[str] = Field(default_factory=list)
+    # Space linking (T1): only these Chat users can run LINK, UNLINK and LINKED. Empty = nobody.
+    bot_admin_chat_user_ids: list[str] = Field(default_factory=list)
+    # Clients a space can be linked to. A linked space belongs to exactly one of these.
+    client_names: list[str] = Field(default_factory=lambda: ["GPL", "L&T Valves", "TVS"])
     evening_reminder_time: str = "18:00"
     # Local time (HH:MM) after which the day's routed project posts are sent, once per day.
     routed_post_time: str = "18:30"
