@@ -11,6 +11,7 @@ class WorkPackage(BaseModel):
     id: int
     subject: str
     project_name: str | None = None
+    project_id: int | None = None
     status_name: str
     status_is_closed: bool
     priority_name: str | None = None

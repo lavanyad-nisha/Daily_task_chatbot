@@ -4,7 +4,10 @@
 
 Management alone assigns tasks in OpenProject. The bot never creates, assigns, reassigns or
 deletes work packages, and never changes anything on a work package except its status.
-The bot does not use AI.
+The bot uses AI in one place only: summarising an employee's DSR text for the project Chat space,
+with Claude Haiku 5.5 (`claude-haiku-5-5`), approved by the TL. Only the work-description text is
+sent. No IDs, names, emails or Chat IDs. If the API is unavailable or refuses, a rule-based
+shortening is used instead. The AI never chooses tasks, statuses, hours, projects or spaces.
 
 The only OpenProject writes the bot performs:
 - creating a time entry for a confirmed DSR entry (`POST /api/v3/time_entries`)
@@ -26,27 +29,30 @@ updates off. Enforced by `tests/test_business_rules.py`.
 | 5. Sync to Jibble | Not built. Blocked on Jibble API details and mapping. | none yet |
 | 6. Next-day reminders from latest assignments and previous DSR | Not built. Planned as T7. | none yet |
 
-## Task visibility (built; tests in `tests/test_task_window.py`)
+## Task eligibility and reminders (Phase A; tests in `tests/test_task_window.py`)
 
-Each task has a start date and a due date, set in OpenProject. An employee's list (DSR card,
-`TASKS`, 9:30 AM plan, daily summary) shows a task when all of these are true:
-1. It is not completed: not closed or rejected in OpenProject, and not one of the statuses in
-   `DTB_COMPLETED_STATUS_IDS` (default Tested 10, Resolved 16, Passed 17).
+Two rules, with different scopes:
+
+**Eligible for update (DSR card, `TASKS`, `UPDATE`, `STATUS`, DSR submission).** A task is eligible
+when all are true, on any date:
+1. It is not completed. Completed means closed or rejected in OpenProject, or one of the statuses
+   Tested (10), Resolved (16), Passed (17) (`COMPLETED_STATUS_IDS`).
 2. Its assignee is that employee's OpenProject user ID.
-3. Its start date has come (a task starting in the future is not listed yet).
-4. It belongs to a project in `DTB_OPENPROJECT_PROJECT_IDS`, when that list is set.
+3. It belongs to a project in `DTB_OPENPROJECT_PROJECT_IDS`, when that list is set.
 
-Overdue tasks (due date passed) stay listed and are flagged **OVERDUE**, so hours can still be
-logged on late work. `DTB_SHOW_OVERDUE_TASKS=false` hides them instead.
+Start and due dates do not limit updates. An employee can update an eligible task at any time, even
+if it was not in that day's reminder. Overdue and future-dated tasks are eligible.
 
-Tasks without a start or due date stay listed and are flagged **NO DATES**. On 25-Nov-2026, 85 of
-191 open assigned tasks had no dates and the other 106 were overdue, so hiding them would have
-emptied every list. Set `DTB_SHOW_UNDATED_TASKS=false` once management has dated the tasks.
+**Due for a reminder (morning plan and daily summary).** A task is listed in the reminder only when it
+is eligible and its due date is today, in `Asia/Kolkata`. Start dates and other days are ignored.
 
-Next task: once the current task is completed in OpenProject, the next task whose start date has
-come appears. Nothing else needs to happen.
+**Submission check:** a DSR entry is refused only if its task is closed, completed, or not assigned to
+the employee. Future-dated and overdue tasks are accepted.
 
-Submission check: a DSR entry is refused if its task would not be listed today by the same rules.
+Tasks without a due date are not reminded, but they stay eligible for updates.
+
+The earlier settings `DTB_SHOW_OVERDUE_TASKS` and `DTB_SHOW_UNDATED_TASKS` were removed. Overdue
+and undated tasks stay updatable, and reminders list only tasks due today.
 
 Note: earlier the code deliberately ignored OpenProject dates as stale (`API_MAPPINGS.md`,
 `models.py`). Start and due dates are now used. Percentage done and estimates are still not used.
@@ -83,3 +89,15 @@ and NEW-then-seen cases.
 - Editing or deleting time entries.
 - Any OpenProject write other than the two listed above.
 - External writes while `DTB_ALLOW_EXTERNAL_WRITES=false`.
+
+## Routing and preview (Phase B and C)
+
+- **Route by project and role.** Each DSR entry goes to the Chat space for its work package's
+  OpenProject project and the employee's role on that project (`project_routes`).
+- **Roles come from OpenProject memberships.** They are read-only and refreshed from a complete
+  snapshot (`employee_project_roles`). A role removed in OpenProject is removed here.
+- **One match is routed.** No roles, or no active route for those roles, is `missing`. Routes to two
+  or more spaces is `ambiguous`. Neither is guessed.
+- **Flagged entries are held for review.** They do not stop routed entries.
+- **`PREVIEW` shows the routing** of today's saved entries, grouped by space. It sends nothing.
+- Posting is still as the bot. Posting as the employee is not built.

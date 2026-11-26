@@ -1,13 +1,12 @@
-"""Which open tasks are listed on a given day, from OpenProject start and due dates.
+"""Which OpenProject tasks an employee can update, and which are due for a reminder.
 
-Rules (see docs/BUSINESS_RULES.md, "Task visibility"):
-- Completed tasks are never listed: closed in OpenProject (Closed, Rejected), or a status in
-  TaskRules.completed_status_ids (default Tested 10, Resolved 16, Passed 17).
-- A task whose start date is after the day is not listed yet.
-- Overdue tasks (due date passed) stay listed and are flagged OVERDUE, so hours can still be
-  logged on late work. TaskRules.show_overdue=False hides them instead.
-- Tasks without a start or due date stay listed and are flagged NO DATES, until management has
-  dated them. TaskRules.show_undated=False hides them instead.
+Rules (see docs/BUSINESS_RULES.md, "Task eligibility and reminders"):
+- Completed tasks are never listed or updated: closed in OpenProject (Closed, Rejected), or a status
+  in TaskRules.completed_status_ids (default Tested 10, Resolved 16, Passed 17).
+- Eligible for update: open and not completed, on any date. Start and due dates do not limit updates,
+  so overdue and undated tasks are eligible too.
+- Due for a reminder: eligible and due on that day (due date equals the day, Asia/Kolkata).
+- OVERDUE and NO DATES flags are informational (for display). They do not hide tasks.
 
 Pure functions; no I/O.
 """
@@ -34,16 +33,10 @@ class _Task(Protocol):
 @dataclass(frozen=True)
 class TaskRules:
     completed_status_ids: frozenset[int] = DEFAULT_COMPLETED_STATUS_IDS
-    show_overdue: bool = True
-    show_undated: bool = True
 
     @classmethod
     def from_settings(cls, settings: Any) -> "TaskRules":
-        return cls(
-            completed_status_ids=frozenset(settings.completed_status_ids),
-            show_overdue=settings.show_overdue_tasks,
-            show_undated=settings.show_undated_tasks,
-        )
+        return cls(completed_status_ids=frozenset(settings.completed_status_ids))
 
 
 DEFAULT_RULES = TaskRules()
@@ -53,23 +46,20 @@ def is_completed(wp: _Task, rules: TaskRules = DEFAULT_RULES) -> bool:
     return wp.status_is_closed or (wp.status_id is not None and wp.status_id in rules.completed_status_ids)
 
 
+def is_eligible(wp: _Task, rules: TaskRules = DEFAULT_RULES) -> bool:
+    """Open and not completed, on any date. The caller checks the assignee."""
+    return not is_completed(wp, rules)
+
+
+def is_due_on(wp: _Task, day: date, rules: TaskRules = DEFAULT_RULES) -> bool:
+    """Eligible and due on this day. Used for reminders only."""
+    return is_eligible(wp, rules) and wp.due_date == day
+
+
 def task_flag(wp: _Task, day: date) -> str | None:
-    """OVERDUE, NO DATES, or None for a task inside its date window."""
+    """OVERDUE, NO DATES, or None. Informational only; it never hides a task."""
     if wp.start_date is None or wp.due_date is None:
         return NO_DATES
     if wp.due_date < day:
         return OVERDUE
     return None
-
-
-def is_scheduled_on(wp: _Task, day: date, rules: TaskRules = DEFAULT_RULES) -> bool:
-    if is_completed(wp, rules):
-        return False
-    if wp.start_date is not None and wp.start_date > day:
-        return False  # not started yet
-    flag = task_flag(wp, day)
-    if flag == NO_DATES:
-        return rules.show_undated
-    if flag == OVERDUE:
-        return rules.show_overdue
-    return True

@@ -20,10 +20,21 @@ from daily_task_bot.clients.jibble import JibbleAuth, JibbleClient
 from daily_task_bot.clients.openproject import OpenProjectClient
 from daily_task_bot.config import Settings, jibble_configuration_problems
 from daily_task_bot.db.models import Employee, ExternalSyncRecord
+from daily_task_bot.services.chat_events import local_today
 from daily_task_bot.services.jibble_hour_sync import run_jibble_sync
 from daily_task_bot.services.openproject_time_sync import run_time_entry_sync
+from daily_task_bot.services.routing_job import routing_done_for_today, run_routing_once
 
 logger = logging.getLogger("daily_task_bot.background")
+
+# After routed_post_time, live routed posts run every cycle (late DSRs are posted too); dry runs run once
+# per local day. Reset on restart; live posts are recorded in routed_posts, so nothing is posted twice.
+_routing_day_done = None
+
+
+def _mark_routing_done(day) -> None:
+    global _routing_day_done
+    _routing_day_done = day
 
 NO_MAPPING = "employee has no Jibble mapping"
 NO_PROJECT = "Jibble project and activity are not configured"
@@ -146,6 +157,16 @@ async def background_sync_loop(settings: Settings, session_factory: sessionmaker
             logger.info("background reminder cycle: %s", reminders)
         except Exception as exc:
             logger.warning("background reminder cycle failed: %s", type(exc).__name__)
+        try:
+            now = datetime.now(UTC)
+            today = local_today(settings, now)
+            if _routing_day_done != today:
+                routing = await run_routing_once(settings, session_factory, now=now)
+                logger.info("background routing cycle: %s", {k: v for k, v in routing.items() if k != "day"})
+                if routing_done_for_today(settings, routing):
+                    _mark_routing_done(today)
+        except Exception as exc:
+            logger.warning("background routing cycle failed: %s", type(exc).__name__)
         try:
             await asyncio.wait_for(stop.wait(), timeout=interval)
         except TimeoutError:

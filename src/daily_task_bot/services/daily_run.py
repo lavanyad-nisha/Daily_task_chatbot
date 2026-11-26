@@ -12,7 +12,7 @@ from daily_task_bot.domain.matcher import match_messages
 from daily_task_bot.domain.models import ChatMessage, Employee, LeaveWindow, WorkPackage
 from daily_task_bot.domain.rendering import render_summary
 from daily_task_bot.domain.summary import build_summary
-from daily_task_bot.domain.task_window import DEFAULT_RULES, TaskRules, is_scheduled_on
+from daily_task_bot.domain.task_window import DEFAULT_RULES, TaskRules, is_due_on
 
 Outcome = Literal["dry_run", "sent", "failed", "skipped"]
 
@@ -77,7 +77,7 @@ async def run_daily_summary(
     work_packages = await openproject.get_open_work_packages(statuses, project_ids)
     by_assignee: dict[int, list[WorkPackage]] = {}
     for wp in work_packages:
-        if wp.assignee_id is not None and is_scheduled_on(wp, run_date, task_rules):
+        if wp.assignee_id is not None and is_due_on(wp, run_date, task_rules):
             by_assignee.setdefault(wp.assignee_id, []).append(wp)
 
     chat_messages: list[ChatMessage] = []

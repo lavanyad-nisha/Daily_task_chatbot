@@ -1,7 +1,7 @@
 """Application settings, loaded from environment variables (prefix DTB_) or a .env file."""
 
-from functools import lru_cache
 from datetime import date
+from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -25,11 +25,9 @@ class Settings(BaseSettings):
     # Task visibility (domain/task_window.py). Completed = closed in OpenProject or one of these
     # status IDs (live IDs: Tested 10, Resolved 16, Passed 17).
     completed_status_ids: list[int] = Field(default_factory=lambda: [10, 16, 17])
-    # Overdue tasks stay listed (flagged OVERDUE) so late work can still be logged. False = hide.
-    show_overdue_tasks: bool = True
-    # Tasks without a start or due date stay listed (flagged NO DATES). False = hide them, once
-    # management has dated all tasks in OpenProject.
-    show_undated_tasks: bool = True
+
+    # Anthropic (Claude Haiku 5.5 for DSR summaries). Read from ANTHROPIC_API_KEY, not DTB_-prefixed.
+    anthropic_api_key: SecretStr | None = Field(default=None, validation_alias="ANTHROPIC_API_KEY")
 
     # Google Chat
     gchat_service_account_file: Path | None = None
@@ -62,6 +60,8 @@ class Settings(BaseSettings):
     # Pilot: the only Chat user IDs that receive reminders or may submit a DSR. Empty = nobody.
     pilot_chat_user_ids: list[str] = Field(default_factory=list)
     evening_reminder_time: str = "18:00"
+    # Local time (HH:MM) after which the day's routed project posts are sent, once per day.
+    routed_post_time: str = "18:30"
 
     # Employee and leave data (local files until directory / calendar access is approved)
     employees_file: Path = Path("config/employees.json")

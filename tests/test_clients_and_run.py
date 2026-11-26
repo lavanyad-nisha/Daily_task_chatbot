@@ -99,7 +99,7 @@ NOW = datetime(2026, 11, 18, 9, 0)
 
 
 async def test_dry_run_renders_without_posting():
-    wps = [WorkPackage(id=10, subject="A", status_name="New", status_is_closed=False, assignee_id=5, start_date=date(2026, 11, 18), due_date=date(2026, 11, 20))]
+    wps = [WorkPackage(id=10, subject="A", status_name="New", status_is_closed=False, assignee_id=5, start_date=date(2026, 11, 18), due_date=date(2026, 11, 18))]
     chat = FakeChat()
     report = await run_daily_summary(
         run_date=NOW.date(), now=NOW, employees=EMPLOYEES, leave_by_email={}, holidays=set(),
@@ -112,8 +112,8 @@ async def test_dry_run_renders_without_posting():
 
 async def test_live_run_posts_and_isolates_failures():
     wps = [
-        WorkPackage(id=10, subject="A", status_name="New", status_is_closed=False, assignee_id=5, start_date=date(2026, 11, 18), due_date=date(2026, 11, 20)),
-        WorkPackage(id=20, subject="B", status_name="New", status_is_closed=False, assignee_id=6, start_date=date(2026, 11, 18), due_date=date(2026, 11, 20)),
+        WorkPackage(id=10, subject="A", status_name="New", status_is_closed=False, assignee_id=5, start_date=date(2026, 11, 18), due_date=date(2026, 11, 18)),
+        WorkPackage(id=20, subject="B", status_name="New", status_is_closed=False, assignee_id=6, start_date=date(2026, 11, 18), due_date=date(2026, 11, 18)),
     ]
     chat = FakeChat(fail_for="dm-users/2")
     report = await run_daily_summary(
@@ -125,7 +125,7 @@ async def test_live_run_posts_and_isolates_failures():
 
 
 async def test_on_leave_employee_gets_cover_summary_and_leave_is_respected():
-    wps = [WorkPackage(id=10, subject="A", status_name="New", status_is_closed=False, assignee_id=5, start_date=date(2026, 11, 18), due_date=date(2026, 11, 20))]
+    wps = [WorkPackage(id=10, subject="A", status_name="New", status_is_closed=False, assignee_id=5, start_date=date(2026, 11, 18), due_date=date(2026, 11, 18))]
     leave = {"asha@example.com": [LeaveWindow(start=date(2026, 11, 18), end=date(2026, 11, 20))]}
     report = await run_daily_summary(
         run_date=NOW.date(), now=NOW, employees=EMPLOYEES[:1], leave_by_email=leave, holidays=set(),
@@ -143,7 +143,7 @@ async def test_chat_updates_only_count_from_the_employee_themselves():
                 ChatMessage(space=space, sender_id="users/2", created_at=NOW, text="also #10"),
             ]
 
-    wps = [WorkPackage(id=10, subject="A", status_name="New", status_is_closed=False, assignee_id=5, start_date=date(2026, 11, 18), due_date=date(2026, 11, 20))]
+    wps = [WorkPackage(id=10, subject="A", status_name="New", status_is_closed=False, assignee_id=5, start_date=date(2026, 11, 18), due_date=date(2026, 11, 18))]
     report = await run_daily_summary(
         run_date=NOW.date(), now=NOW, employees=EMPLOYEES[:1], leave_by_email={}, holidays=set(),
         openproject=FakeOpenProject(wps), chat_reader=FakeReader(), read_spaces=["spaces/A"], dry_run=True,

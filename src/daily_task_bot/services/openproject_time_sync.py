@@ -19,7 +19,7 @@ The caller controls commits. The runner commits after claiming a batch, and agai
 record, so a crash leaves a lease that expires instead of a stuck record.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
 from typing import Protocol
 
@@ -549,3 +549,42 @@ def sync_status_for_submission(session: Session, submission_id: int) -> list[dic
         }
         for r in rows
     ]
+
+
+async def push_status_now(
+    session: Session, *, entry: DsrEntry, client: OpenProjectPort, statuses,
+    status_choices: frozenset[int], now: datetime,
+) -> RecordResult | None:
+    """Send one entry's status change to OpenProject straight away, for today's DSR only.
+
+    Creates the status record if it does not exist yet, then runs the same checks as the
+    scheduled sync (approved status, assignment, open task, OpenProject workflow, lock version).
+    The go-live date does not apply here: it only limits the scheduled backlog sync.
+    Returns None when the entry has no status change.
+    """
+    if entry.new_status_id is None:
+        return None
+    employee = authorize_submission(session, entry.submission)
+    if not _has_record(session, entry.id, STATUS_TARGET):
+        payload = status_change_payload(
+            work_package_id=entry.work_package_id, status_id=entry.new_status_id
+        )
+        session.add(ExternalSyncRecord(
+            dsr_entry_id=entry.id,
+            employee_id=employee.id,
+            target=STATUS_TARGET,
+            idempotency_key=openproject_status_idempotency_key(entry.id),
+            payload_hash=payload_hash(payload),
+            status="pending",
+        ))
+        session.flush()
+    record = session.scalar(select(ExternalSyncRecord).where(
+        ExternalSyncRecord.dsr_entry_id == entry.id, ExternalSyncRecord.target == STATUS_TARGET))
+    result = await process_record(
+        session, record, client, now=now, statuses=statuses, dry_run=False,
+        status_choices=status_choices,
+    )
+    if not result.detail:
+        # Refusals store their reason on the record, not in the result. Carry it over for the reply.
+        result = replace(result, detail=record.last_error or "")
+    return result
