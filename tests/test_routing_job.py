@@ -144,3 +144,50 @@ def test_routed_post_time_gate():
     settings = _settings()
     assert not is_due(settings, NOW_EARLY)
     assert is_due(settings, NOW_DUE)
+
+
+class CountingSummarizer:
+    def __init__(self):
+        self.calls = 0
+
+    def summarize(self, text):
+        self.calls += 1
+        return "Summary."
+
+
+LONG_TEXT = ("Ran the full login UAT on staging with three user roles, fixed two null checks in the "
+             "session handler, retested every case and all of them passed before the end of the day.")
+
+
+@pytestmark_db
+def test_already_posted_space_is_not_summarised_again(world):
+    session = world["session"]
+    entry_owner = session.scalar(select(Employee).where(Employee.chat_user_id == CHAT_USER))
+    create_draft(session, employee_id=entry_owner.id, dsr_date=date(2026, 11, 26), entries=[
+        EntryInput(work_package_id=702, hours_spent=Decimal("3"), work_done=LONG_TEXT),
+    ])
+    session.flush()
+    later = datetime(2026, 11, 26, 13, 30, tzinfo=UTC)
+    chat, counter = FakeChat(), CountingSummarizer()
+    run = lambda: asyncio.run(run_routing_cycle(world["factory"], _settings(dry_run=False), FakeOpenProject(),
+                                                chat, now=later, summarizer=counter))
+    first = run()
+    assert first["posted"] == 1 and counter.calls == 1
+    second = run()
+    assert second["posted"] == 0 and second["already_posted"] == 1
+    assert counter.calls == 1  # no second AI call for a space already posted
+
+
+def test_live_runs_repeat_after_the_post_time_and_dry_runs_do_not():
+    from daily_task_bot.services.routing_job import routing_done_for_today
+    live = _settings(dry_run=False, allow_external_writes=True)
+    dry = _settings(dry_run=True)
+    assert not routing_done_for_today(live, {"status": "waiting"})
+    assert not routing_done_for_today(live, {"status": "ran"})  # later DSRs are posted next cycle
+    assert routing_done_for_today(dry, {"status": "ran"})
+    assert routing_done_for_today(live, {"status": "skipped"})
+
+
+def test_summary_call_has_a_short_timeout():
+    from daily_task_bot.services.routing_job import SUMMARY_TIMEOUT_SECONDS
+    assert SUMMARY_TIMEOUT_SECONDS <= 60

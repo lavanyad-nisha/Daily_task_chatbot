@@ -2,10 +2,14 @@
 
 - Dry run (the default) logs what would be posted. Nothing is sent and nothing is recorded.
 - A live post is recorded in routed_posts, so the same employee, space and day is never posted twice.
+  Live runs repeat every background cycle after routed_post_time, so DSRs saved later in the evening
+  are posted too. Entries for spaces already posted today are not summarised again (no extra AI calls).
+  A correction made after the employee's post for that space is not posted again.
 - Only pilot employees with saved entries for the day are handled.
 - Reads OpenProject (memberships, tasks) and writes only to the bot database, plus Chat posts when live.
 """
 
+import asyncio
 from datetime import datetime, time
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -20,6 +24,27 @@ from daily_task_bot.services.dsr_preview import PreviewLine
 from daily_task_bot.services.routed_posting import plan_routed_posts, send_plans
 from daily_task_bot.services.routing_sync import load_routes, roles_by_project, sync_employee_roles
 from daily_task_bot.services.summarizer import summarize
+
+
+SUMMARY_TIMEOUT_SECONDS = 30.0  # one slow AI call must not hold up the background loop
+
+
+def is_live(settings: Settings) -> bool:
+    return settings.allow_external_writes and not settings.dry_run
+
+
+def routing_done_for_today(settings: Settings, result: dict[str, Any]) -> bool:
+    """Whether the background loop can stop running the routing job for the rest of the local day.
+
+    Before routed_post_time: not done. A live run: never done, so later DSRs are posted on the next
+    cycle (routed_posts prevents duplicates). Dry run or skipped: done after one run, so the summaries
+    are not rebuilt every cycle.
+    """
+    if result.get("status") == "waiting":
+        return False
+    if result.get("status") == "ran" and is_live(settings):
+        return False
+    return True
 
 
 def _clock(value: str) -> time:
@@ -59,7 +84,7 @@ async def run_routing_cycle(session_factory: sessionmaker, settings: Settings, o
                             *, now: datetime, summarizer: Any | None) -> dict[str, Any]:
     day = local_today(settings, now)
     report: dict[str, Any] = {"day": day.isoformat(), "roles": None, "employees": 0, "skipped": 0,
-                              "posted": 0, "would_post": 0, "failed": 0, "flagged": 0}
+                              "posted": 0, "would_post": 0, "failed": 0, "flagged": 0, "already_posted": 0}
 
     memberships = await op_client.list_user_memberships()
     with session_factory() as session:
@@ -81,13 +106,26 @@ async def run_routing_cycle(session_factory: sessionmaker, settings: Settings, o
             if not lines:
                 report["skipped"] += 1
                 continue
-            report["employees"] += 1
-            summaries = {line.work_package_id: summarize(line.work_done, summarizer).text for line in lines}
             done_spaces = set(session.scalars(select(RoutedPost.space_id).where(
                 RoutedPost.employee_id == employee.id, RoutedPost.post_date == day)))
+            roles = roles_by_project(session, employee.id)
+            # Plan first without summaries, so entries for spaces already posted are never summarised.
+            draft = plan_routed_posts(employee_name=employee.name, dsr_date=day, lines=lines,
+                                      roles_by_project=roles, routes=routes)
+            pending_ids = {wp for p in draft.posts if p.space_id not in done_spaces for wp in p.work_package_ids}
+            if not pending_ids:
+                report["already_posted"] += 1
+                continue
+            report["employees"] += 1
+            summaries = {}
+            for line in lines:
+                if line.work_package_id in pending_ids:
+                    # The SDK call is blocking; run it in a thread so the web server keeps answering.
+                    result = await asyncio.to_thread(summarize, line.work_done, summarizer)
+                    summaries[line.work_package_id] = result.text
             plan = plan_routed_posts(
                 employee_name=employee.name, dsr_date=day, lines=lines,
-                roles_by_project=roles_by_project(session, employee.id), routes=routes, summaries=summaries,
+                roles_by_project=roles, routes=routes, summaries=summaries,
             )
             report["flagged"] += len(plan.flagged)
             posts = [p for p in plan.posts if p.space_id not in done_spaces]
@@ -127,7 +165,10 @@ async def run_routing_once(settings: Settings, session_factory: sessionmaker, *,
         import anthropic
 
         from daily_task_bot.services.summarizer import HaikuSummarizer
-        summarizer = HaikuSummarizer(anthropic.Anthropic(api_key=settings.anthropic_api_key.get_secret_value()))
+        summarizer = HaikuSummarizer(anthropic.Anthropic(
+            api_key=settings.anthropic_api_key.get_secret_value(),
+            timeout=SUMMARY_TIMEOUT_SECONDS, max_retries=1,
+        ))
     try:
         report = await run_routing_cycle(session_factory, settings, op_client, gchat, now=now, summarizer=summarizer)
         return {"status": "ran", **report}

@@ -23,12 +23,12 @@ from daily_task_bot.db.models import Employee, ExternalSyncRecord
 from daily_task_bot.services.chat_events import local_today
 from daily_task_bot.services.jibble_hour_sync import run_jibble_sync
 from daily_task_bot.services.openproject_time_sync import run_time_entry_sync
-from daily_task_bot.services.routing_job import run_routing_once
+from daily_task_bot.services.routing_job import routing_done_for_today, run_routing_once
 
 logger = logging.getLogger("daily_task_bot.background")
 
-# The routed project posts run once per local day, after routed_post_time. Reset on restart; live posts
-# are also recorded in routed_posts, so a restart cannot post the same message twice.
+# After routed_post_time, live routed posts run every cycle (late DSRs are posted too); dry runs run once
+# per local day. Reset on restart; live posts are recorded in routed_posts, so nothing is posted twice.
 _routing_day_done = None
 
 
@@ -163,7 +163,7 @@ async def background_sync_loop(settings: Settings, session_factory: sessionmaker
             if _routing_day_done != today:
                 routing = await run_routing_once(settings, session_factory, now=now)
                 logger.info("background routing cycle: %s", {k: v for k, v in routing.items() if k != "day"})
-                if routing.get("status") != "waiting":
+                if routing_done_for_today(settings, routing):
                     _mark_routing_done(today)
         except Exception as exc:
             logger.warning("background routing cycle failed: %s", type(exc).__name__)
