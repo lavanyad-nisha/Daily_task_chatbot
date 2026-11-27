@@ -48,7 +48,7 @@ class FakeOpenProject:
     async def get_statuses(self):
         return self.statuses
 
-    async def get_open_work_packages(self, statuses, project_ids=None):
+    async def get_open_work_packages(self, statuses, project_ids=None, assignee_id=None):
         return [WorkPackage(id=w, subject=f"Task {w}", status_name="In progress", status_id=7, status_is_closed=False,
                             assignee_id=OP_USER, start_date=date(2026, 11, 20), due_date=date(2026, 11, 30))
                 for w in self.assigned if w not in self.closed]

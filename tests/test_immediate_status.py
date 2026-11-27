@@ -31,7 +31,7 @@ class FakeOpenProject:
     async def get_statuses(self):
         return {}
 
-    async def get_open_work_packages(self, statuses, project_ids=None):
+    async def get_open_work_packages(self, statuses, project_ids=None, assignee_id=None):
         return [WorkPackage(id=1, subject="Login UAT", status_name="In progress", status_is_closed=False,
                             status_id=7, assignee_id=OP_USER, project_id=7)]
 

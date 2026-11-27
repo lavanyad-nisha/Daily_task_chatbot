@@ -275,7 +275,8 @@ class OpenProjectClient:
         }
 
     async def get_open_work_packages(
-        self, statuses: dict[int, Status], project_ids: list[int] | None = None
+        self, statuses: dict[int, Status], project_ids: list[int] | None = None,
+        assignee_id: int | None = None,
     ) -> list[WorkPackage]:
         """Fetch all open work packages, optionally limited to some projects.
 
@@ -285,6 +286,9 @@ class OpenProjectClient:
         filters: list[dict[str, Any]] = [{"status_id": {"operator": "o", "values": []}}]
         if project_ids:
             filters.append({"project": {"operator": "=", "values": [str(p) for p in project_ids]}})
+        if assignee_id is not None:
+            # Let OpenProject return only this person's tasks (one page) instead of all ~1,000.
+            filters.append({"assignee": {"operator": "=", "values": [str(assignee_id)]}})
 
         results: list[WorkPackage] = []
         page = 1
