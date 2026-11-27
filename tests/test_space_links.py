@@ -100,7 +100,7 @@ def test_spaces_group_chats_and_unknown_types_are_not_private(space):
 def test_added_to_a_space_asks_for_link_not_dsr():
     event = {"type": "ADDED_TO_SPACE", "space": {"name": SPACE, "spaceType": "SPACE"}}
     reply = asyncio.run(handle_chat_event(event, session=None, op_client=None, settings=_settings()))
-    assert "LINK [client]" in reply["text"] and "Type DSR" not in reply["text"]
+    assert "@InsightBot LINK [client]" in reply["text"] and "Type DSR" not in reply["text"]
 
 
 def test_added_to_a_dm_keeps_the_dsr_greeting():
@@ -308,4 +308,4 @@ def test_non_admin_adding_the_app_with_link_is_refused(session):
 @pytestmark_db
 def test_other_text_while_adding_the_app_gets_the_greeting(session):
     reply = _run(session, _added_with_message("TASKS"))
-    assert "LINK [client]" in reply["text"]
+    assert "@InsightBot LINK [client]" in reply["text"]

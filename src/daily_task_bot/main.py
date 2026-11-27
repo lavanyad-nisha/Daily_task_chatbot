@@ -2,6 +2,7 @@
 
 Endpoints:
 - GET  /health            liveness check
+- GET  /avatar.png        the Chat app avatar (public; set as the Avatar URL in the Chat API config)
 - POST /internal/run      runs the daily summary. Requires header X-Run-Secret.
                           Defaults to dry-run, so nothing is posted to Chat unless
                           dry_run=false is passed and DTB_DRY_RUN is also false.
@@ -9,10 +10,12 @@ Endpoints:
 
 import asyncio
 from contextlib import asynccontextmanager
+from pathlib import Path
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse
 
 from daily_task_bot.api.chat import router as chat_router
 from daily_task_bot.api.internal import router as internal_router
@@ -51,6 +54,14 @@ app.include_router(chat_router)
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+AVATAR_PATH = Path(__file__).resolve().parent / "static" / "avatar.png"
+
+
+@app.get("/avatar.png", include_in_schema=False)
+async def avatar() -> FileResponse:
+    return FileResponse(AVATAR_PATH, media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
 
 
 @app.post("/internal/run", dependencies=[Depends(require_run_secret)])

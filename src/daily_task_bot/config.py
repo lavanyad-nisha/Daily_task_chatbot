@@ -59,6 +59,8 @@ class Settings(BaseSettings):
     morning_send_time: str = "09:30"
     # Pilot: the only Chat user IDs that receive reminders or may submit a DSR. Empty = nobody.
     pilot_chat_user_ids: list[str] = Field(default_factory=list)
+    # The Chat app's display name (what people type after @). Must match the name in the Chat API config.
+    bot_name: str = "InsightBot"
     # Space linking (T1): only these Chat users can run LINK, UNLINK and LINKED. Empty = nobody.
     bot_admin_chat_user_ids: list[str] = Field(default_factory=list)
     # Clients a space can be linked to, with each client's OpenProject parent project ID.
