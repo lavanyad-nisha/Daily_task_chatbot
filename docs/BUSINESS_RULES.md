@@ -36,15 +36,21 @@ updates off. Enforced by `tests/test_business_rules.py`.
 
 Two rules, with different scopes:
 
-**Eligible for update (DSR card, `TASKS`, `UPDATE`, `STATUS`, DSR submission).** A task is eligible
-when all are true, on any date:
+**Eligible (DSR submission).** A task is eligible when all are true:
 1. It is not completed. Completed means closed or rejected in OpenProject, or one of the statuses
    Tested (10), Resolved (16), Passed (17) (`COMPLETED_STATUS_IDS`).
 2. Its assignee is that employee's OpenProject user ID.
 3. It belongs to a project in `DTB_OPENPROJECT_PROJECT_IDS`, when that list is set.
 
-Start and due dates do not limit updates. An employee can update an eligible task at any time, even
-if it was not in that day's reminder. Overdue and future-dated tasks are eligible.
+**Listed (DSR card, `TASKS`, and the numbers `UPDATE` and `STATUS` use).** An eligible task is listed
+only when it has a due date that is either:
+- before today: shown under **Overdue**, or
+- today or within the next 7 days counting today (`DTB_TASK_WINDOW_DAYS`, default 7): shown under
+  **Due in the next 7 days**.
+
+Tasks with no due date, or due after the window, are not listed. Start dates are ignored. Overdue tasks
+come first, then due-soon tasks, each by due date and then ID; the numbers run straight through both
+sections. The DSR card shows the same two sections.
 
 **Due for a reminder (morning plan and daily summary).** A task is listed in the reminder only when it
 is eligible and its due date is today, in `Asia/Kolkata`. Start dates and other days are ignored.
@@ -52,10 +58,11 @@ is eligible and its due date is today, in `Asia/Kolkata`. Start dates and other 
 **Submission check:** a DSR entry is refused only if its task is closed, completed, or not assigned to
 the employee. Future-dated and overdue tasks are accepted.
 
-Tasks without a due date are not reminded, but they stay eligible for updates.
+Tasks without a due date are not reminded or listed. To get one onto the list, set its due date in
+OpenProject.
 
-The earlier settings `DTB_SHOW_OVERDUE_TASKS` and `DTB_SHOW_UNDATED_TASKS` were removed. Overdue
-and undated tasks stay updatable, and reminders list only tasks due today.
+The earlier settings `DTB_SHOW_OVERDUE_TASKS` and `DTB_SHOW_UNDATED_TASKS` were removed. Reminders
+list only tasks due today.
 
 Note: earlier the code deliberately ignored OpenProject dates as stale (`API_MAPPINGS.md`,
 `models.py`). Start and due dates are now used. Percentage done and estimates are still not used.

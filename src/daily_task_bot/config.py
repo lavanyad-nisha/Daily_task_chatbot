@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     # Task visibility (domain/task_window.py). Completed = closed in OpenProject or one of these
     # status IDs (live IDs: Tested 10, Resolved 16, Passed 17).
     completed_status_ids: list[int] = Field(default_factory=lambda: [10, 16, 17])
+    # TASKS and the DSR card list overdue tasks and tasks due within this many days, counting today.
+    task_window_days: int = Field(default=7, ge=1, le=31)
 
     # Anthropic (Claude Haiku 5.5 for DSR summaries). Read from ANTHROPIC_API_KEY, not DTB_-prefixed.
     anthropic_api_key: SecretStr | None = Field(default=None, validation_alias="ANTHROPIC_API_KEY")

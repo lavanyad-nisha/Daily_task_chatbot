@@ -26,7 +26,7 @@ def _card(tasks):
 
 
 def _widgets(card):
-    return card["cardsV2"][0]["card"]["sections"][0]["widgets"]
+    return [w for s in card["cardsV2"][0]["card"]["sections"] for w in s["widgets"]]
 
 
 def test_card_has_inputs_and_a_submit_button_for_each_task():
@@ -51,7 +51,31 @@ def test_card_status_dropdown_defaults_to_no_change():
 def test_card_without_tasks_says_so_and_has_no_submit_button():
     widgets = _widgets(_card([]))
     assert not any("buttonList" in w for w in widgets)
-    assert any("no open assigned tasks" in w.get("textParagraph", {}).get("text", "") for w in widgets)
+    assert any("no overdue tasks and none due in the next 7 days" in w.get("textParagraph", {}).get("text", "")
+               for w in widgets)
+
+
+def _section_headers(card):
+    return [s.get("header") for s in card["cardsV2"][0]["card"]["sections"]]
+
+
+def test_card_puts_overdue_and_due_soon_tasks_in_their_own_sections():
+    card = build_dsr_card(
+        employee_name="Asha", dsr_date=DAY, status_choices=[],
+        tasks=[CardTask(1, "Late one", "In progress", date(2026, 11, 20), "OVERDUE"),
+               CardTask(2, "Soon one", "In progress", date(2026, 11, 25), "DUE_SOON")],
+    )
+    assert _section_headers(card) == [None, "Overdue", "Due in the next 7 days", None]
+    sections = card["cardsV2"][0]["card"]["sections"]
+    assert sections[1]["widgets"][0]["decoratedText"]["text"] == "Late one (In progress, due 20 Nov)"
+    assert sections[2]["widgets"][0]["decoratedText"]["text"] == "Soon one (In progress, due 25 Nov)"
+    assert "buttonList" in sections[3]["widgets"][0]
+
+
+def test_card_with_only_due_soon_tasks_has_no_overdue_section():
+    card = build_dsr_card(employee_name="Asha", dsr_date=DAY, status_choices=[], window_days=5,
+                          tasks=[CardTask(2, "Soon one", "New", date(2026, 11, 23), "DUE_SOON")])
+    assert _section_headers(card) == [None, "Due in the next 5 days", None]
 
 
 def _form(**values):

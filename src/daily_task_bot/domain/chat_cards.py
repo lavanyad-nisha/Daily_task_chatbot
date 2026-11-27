@@ -39,6 +39,38 @@ class CardTask:
     work_package_id: int
     subject: str
     status_name: str
+    due_date: date | None = None
+    group: str | None = None  # "OVERDUE" or "DUE_SOON" (task_window); None = one plain list
+
+
+OVERDUE_HEADER = "Overdue"
+
+
+def due_label(day: date | None) -> str:
+    return f"due {day.day} {day.strftime('%b')}" if day else "no due date"
+
+
+def due_soon_header(window_days: int) -> str:
+    return f"Due in the next {window_days} days"
+
+
+def task_sections(tasks: list[CardTask], soon_header: str = "Due soon"
+                  ) -> list[tuple[str | None, list[CardTask]]]:
+    """Group tasks for display, keeping their order: overdue first, then due soon.
+
+    Tasks without a group come back as one section with no header.
+    """
+    overdue = [t for t in tasks if t.group == "OVERDUE"]
+    soon = [t for t in tasks if t.group == "DUE_SOON"]
+    other = [t for t in tasks if t.group not in ("OVERDUE", "DUE_SOON")]
+    sections: list[tuple[str | None, list[CardTask]]] = []
+    if overdue:
+        sections.append((OVERDUE_HEADER, overdue))
+    if soon:
+        sections.append((soon_header, soon))
+    if other:
+        sections.append((None, other))
+    return sections
 
 
 @dataclass(frozen=True)
@@ -52,36 +84,48 @@ def _text(value: str) -> dict[str, Any]:
 
 
 def build_dsr_card(
-    *, employee_name: str, dsr_date: date, tasks: list[CardTask], status_choices: list[StatusChoice]
+    *, employee_name: str, dsr_date: date, tasks: list[CardTask], status_choices: list[StatusChoice],
+    window_days: int = 7,
 ) -> dict[str, Any]:
-    """A cardsV2 message asking for today's DSR. Returns the message body."""
-    widgets: list[dict[str, Any]] = [_text(
+    """A cardsV2 message asking for today's DSR. Returns the message body.
+
+    Overdue tasks and tasks due soon get their own card sections, each with a header.
+    """
+    intro: list[dict[str, Any]] = [_text(
         f"Hi {employee_name}, please submit your work for {dsr_date.isoformat()}. "
         "Leave hours blank for tasks you did not work on."
     )]
     if not tasks:
-        widgets.append(_text("You have no open assigned tasks today."))
+        intro.append(_text(f"You have no overdue tasks and none due in the next {window_days} days."))
+    sections: list[dict[str, Any]] = [{"widgets": intro}]
     choice_items = [{"text": "No change", "value": NO_CHANGE, "selected": True}] + [
         {"text": c.name, "value": str(c.status_id), "selected": False} for c in status_choices
     ]
-    for task in tasks:
-        wp = task.work_package_id
-        widgets.append({"decoratedText": {"topLabel": f"#{wp}", "text": f"{task.subject} ({task.status_name})"}})
-        widgets.append({"textInput": {"name": hours_field(wp), "label": "Hours worked", "type": "SINGLE_LINE"}})
-        widgets.append({"textInput": {"name": work_field(wp), "label": "Work done", "type": "MULTIPLE_LINE"}})
-        widgets.append({"textInput": {"name": remaining_field(wp), "label": "Remaining work",
-                                      "type": "MULTIPLE_LINE"}})
-        widgets.append({"selectionInput": {"name": status_field(wp), "label": "Status",
-                                           "type": "DROPDOWN", "items": choice_items}})
+    for header, group in task_sections(tasks, due_soon_header(window_days)):
+        widgets: list[dict[str, Any]] = []
+        for task in group:
+            wp = task.work_package_id
+            detail = f"{task.status_name}, {due_label(task.due_date)}" if task.group else task.status_name
+            widgets.append({"decoratedText": {"topLabel": f"#{wp}", "text": f"{task.subject} ({detail})"}})
+            widgets.append({"textInput": {"name": hours_field(wp), "label": "Hours worked", "type": "SINGLE_LINE"}})
+            widgets.append({"textInput": {"name": work_field(wp), "label": "Work done", "type": "MULTIPLE_LINE"}})
+            widgets.append({"textInput": {"name": remaining_field(wp), "label": "Remaining work",
+                                          "type": "MULTIPLE_LINE"}})
+            widgets.append({"selectionInput": {"name": status_field(wp), "label": "Status",
+                                               "type": "DROPDOWN", "items": choice_items}})
+        section: dict[str, Any] = {"widgets": widgets}
+        if header:
+            section["header"] = header
+        sections.append(section)
     if tasks:
-        widgets.append({"buttonList": {"buttons": [{
+        sections.append({"widgets": [{"buttonList": {"buttons": [{
             "text": "Submit DSR",
             "onClick": {"action": {"function": SUBMIT_FUNCTION,
                                    "parameters": [{"key": "dsr_date", "value": dsr_date.isoformat()}]}},
-        }]}})
+        }]}}]})
     return {"cardsV2": [{"cardId": "dsr-form", "card": {
         "header": {"title": "Daily status report"},
-        "sections": [{"widgets": widgets}],
+        "sections": sections,
     }}]}
 
 

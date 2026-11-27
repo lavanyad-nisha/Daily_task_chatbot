@@ -43,7 +43,7 @@ class FakeOpenProject:
 
     async def get_open_work_packages(self, statuses, project_ids=None, assignee_id=None):
         return [WorkPackage(id=w, subject=f"Task {w}", status_name="In progress", status_id=7, status_is_closed=False,
-                            assignee_id=OP_USER, start_date=date(2026, 11, 20), due_date=date(2026, 11, 30))
+                            assignee_id=OP_USER, start_date=date(2026, 11, 20), due_date=date(2026, 11, 28))
                 for w in self.assigned]
 
     async def get_work_package(self, wp_id, statuses=None):
@@ -51,7 +51,7 @@ class FakeOpenProject:
             return None
         return WorkPackageDetail(id=wp_id, assignee_id=OP_USER, status_is_closed=False,
                                  status_id=7, lock_version=1, can_update=True,
-                                 start_date=date(2026, 11, 20), due_date=date(2026, 11, 30))
+                                 start_date=date(2026, 11, 20), due_date=date(2026, 11, 28))
 
 
 @pytest.fixture(scope="module")

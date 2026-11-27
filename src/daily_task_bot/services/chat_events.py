@@ -10,7 +10,7 @@ Security:
 """
 
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from google.auth.transport import requests as google_requests
@@ -25,10 +25,12 @@ from daily_task_bot.domain.chat_cards import (
     CardTask,
     StatusChoice,
     build_dsr_card,
+    due_label,
     parse_dsr_form,
+    task_sections,
 )
 from daily_task_bot.domain.chat_commands import HELP_TEXT, parse_command
-from daily_task_bot.domain.task_window import TaskRules, is_completed, is_eligible, task_flag
+from daily_task_bot.domain.task_window import OVERDUE, TaskRules, is_completed, window_group
 from daily_task_bot.services.dsr import (
     DsrConflictError,
     DsrValidationError,
@@ -105,22 +107,45 @@ def find_employee(session: Session, event: dict[str, Any]) -> Employee | None:
 
 
 async def open_tasks_for(op_client: Any, employee: Employee, settings: Settings, today: date) -> list[CardTask]:
-    """Tasks for the DSR card and TASKS: every open task assigned to the employee, on any date."""
+    """Tasks for the DSR card, TASKS, UPDATE and STATUS: the employee's open tasks that are overdue
+    or due within the window (task_window_days, counting today). Tasks with no due date are not listed.
+
+    Order: overdue first, then due soon; each by due date, then ID. UPDATE and STATUS numbers follow it.
+    """
     statuses = await op_client.get_statuses()
     packages = await op_client.get_open_work_packages(
         statuses, settings.openproject_project_ids or None, assignee_id=employee.openproject_user_id,
     )
     rules = TaskRules.from_settings(settings)
-    return [
-        CardTask(wp.id, wp.subject, _status_label(wp, today))
-        for wp in sorted(packages, key=lambda w: w.id)
-        if wp.assignee_id == employee.openproject_user_id and is_eligible(wp, rules)
-    ]
+    listed = [(window_group(wp, today, rules), wp) for wp in packages
+              if wp.assignee_id == employee.openproject_user_id]
+    listed = [(group, wp) for group, wp in listed if group is not None]
+    listed.sort(key=lambda gw: (gw[0] != OVERDUE, gw[1].due_date, gw[1].id))
+    return [CardTask(wp.id, wp.subject, wp.status_name, wp.due_date, group) for group, wp in listed]
 
 
-def _status_label(wp: Any, today: date) -> str:
-    flag = task_flag(wp, today)
-    return f"{wp.status_name}, {flag}" if flag else wp.status_name
+def _day(value: date) -> str:
+    return f"{value.day} {value.strftime('%b')}"
+
+
+def tasks_text(tasks: list[CardTask], today: date, window_days: int) -> str:
+    """The TASKS reply: an Overdue section, then a Due soon section, numbered straight through."""
+    if not tasks:
+        return (f"You have no overdue tasks and none due in the next {window_days} days. A task is listed "
+                "when it is assigned to you in OpenProject, not completed, and its due date is past or within "
+                f"the next {window_days} days. Tasks with no due date are not listed.")
+    last = today + timedelta(days=window_days - 1)
+    soon_header = f"Due in the next {window_days} days ({_day(today)} - {_day(last)})"
+    blocks: list[str] = []
+    number = 0
+    for header, group in task_sections(tasks, soon_header):
+        lines = [f"{header}:"] if header else []
+        for task in group:
+            number += 1
+            lines.append(f"{number}. #{task.work_package_id} {task.subject} "
+                         f"({task.status_name}, {due_label(task.due_date)})")
+        blocks.append("\n".join(lines))
+    return "Your tasks:\n\n" + "\n\n".join(blocks)
 
 
 async def status_choices_for(op_client: Any, settings: Settings) -> list[StatusChoice]:
@@ -135,6 +160,7 @@ async def dsr_card_for(session: Session, op_client: Any, settings: Settings, emp
         dsr_date=today,
         tasks=await open_tasks_for(op_client, employee, settings, today),
         status_choices=await status_choices_for(op_client, settings),
+        window_days=settings.task_window_days,
     )
 
 
@@ -371,12 +397,7 @@ async def handle_chat_event(
             return _text(await preview_text_for(session, op_client, employee, today))
         tasks = await open_tasks_for(op_client, employee, settings, today)
         if command.name == "TASKS":
-            if not tasks:
-                return _text("You have no open tasks for today. A task shows up here when it is assigned to "
-                             "you in OpenProject, not completed, and its start date has come.")
-            lines = [f"{i}. #{t.work_package_id} {t.subject} ({t.status_name})"
-                     for i, t in enumerate(tasks, start=1)]
-            return _text("Your open tasks:\n" + "\n".join(lines))
+            return _text(tasks_text(tasks, today, settings.task_window_days))
         if command.name in ("UPDATE", "STATUS"):
             number = command.args["task"]
             if number > len(tasks):

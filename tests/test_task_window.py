@@ -91,22 +91,68 @@ def employee():
     return Employee(name="Asha", email="asha@example.com", openproject_user_id=5, chat_user_id="users/1")
 
 
-async def test_card_lists_every_open_task_assigned_to_the_employee_on_any_date():
+# TODAY is 24 Nov, so the 7-day window is 24-30 Nov.
+
+async def test_list_has_overdue_and_due_within_7_days_only():
     packages = [
-        wp(1, start=date(2026, 11, 20), due=date(2026, 11, 30)),   # running: listed
-        wp(2, start=date(2026, 12, 1), due=date(2026, 12, 9)),     # future: listed
-        wp(3, start=date(2026, 11, 20), due=date(2026, 11, 30), closed=True),  # closed: hidden
-        wp(4, start=None, due=None),                               # no dates: listed
-        wp(5, start=date(2026, 11, 20), due=date(2026, 11, 30), assignee=6),   # someone else: hidden
-        wp(6, status_id=10),                                       # completed: hidden
+        wp(1, due=date(2026, 11, 30)),                       # last day of the window: listed
+        wp(2, start=date(2026, 12, 1), due=date(2026, 12, 9)),  # due after the window: hidden
+        wp(3, due=date(2026, 11, 26), closed=True),          # closed: hidden
+        wp(4, start=None, due=None),                         # no dates: hidden
+        wp(5, due=date(2026, 11, 26), assignee=6),           # someone else: hidden
+        wp(6, due=date(2026, 11, 26), status_id=10),         # completed: hidden
+        wp(7, due=TODAY),                                    # due today: listed
+        wp(8, start=date(2026, 7, 1), due=date(2026, 8, 1)),  # overdue: listed
+        wp(9, start=date(2026, 11, 1), due=None),            # start date only: hidden
+        wp(10, due=date(2026, 12, 1)),                       # one day after the window: hidden
     ]
     tasks = await open_tasks_for(FakeOpenProject(packages), employee(), Settings(), TODAY)
-    assert [t.work_package_id for t in tasks] == [1, 2, 4]
+    assert [(t.work_package_id, t.group) for t in tasks] == [(8, "OVERDUE"), (7, "DUE_SOON"), (1, "DUE_SOON")]
+
+
+async def test_overdue_come_first_then_due_soon_each_by_due_date():
+    packages = [wp(1, due=date(2026, 11, 29)), wp(2, due=date(2026, 11, 10)), wp(3, due=date(2026, 11, 25)),
+                wp(4, due=date(2026, 11, 23)), wp(5, due=date(2026, 11, 25))]
+    tasks = await open_tasks_for(FakeOpenProject(packages), employee(), Settings(), TODAY)
+    assert [t.work_package_id for t in tasks] == [2, 4, 3, 5, 1]
+
+
+async def test_window_length_comes_from_the_setting():
+    packages = [wp(1, due=date(2026, 11, 26)), wp(2, due=date(2026, 11, 27))]
+    settings = Settings(_env_file=None, task_window_days=3)  # 24, 25, 26 Nov
+    tasks = await open_tasks_for(FakeOpenProject(packages), employee(), settings, TODAY)
+    assert [t.work_package_id for t in tasks] == [1]
+
+
+def test_tasks_reply_has_an_overdue_section_and_numbers_run_straight_through():
+    from daily_task_bot.domain.chat_cards import CardTask
+    from daily_task_bot.services.chat_events import tasks_text
+    text = tasks_text([CardTask(8, "Old fix", "On hold", date(2026, 9, 21), "OVERDUE"),
+                       CardTask(7, "Login UAT", "In progress", TODAY, "DUE_SOON"),
+                       CardTask(1, "Export", "New", date(2026, 11, 30), "DUE_SOON")], TODAY, 7)
+    assert text == ("Your tasks:\n\n"
+                    "Overdue:\n1. #8 Old fix (On hold, due 21 Sep)\n\n"
+                    "Due in the next 7 days (24 Nov - 30 Nov):\n"
+                    "2. #7 Login UAT (In progress, due 24 Nov)\n3. #1 Export (New, due 30 Nov)")
+
+
+def test_tasks_reply_without_overdue_has_no_overdue_heading():
+    from daily_task_bot.domain.chat_cards import CardTask
+    from daily_task_bot.services.chat_events import tasks_text
+    text = tasks_text([CardTask(7, "Login UAT", "In progress", TODAY, "DUE_SOON")], TODAY, 7)
+    assert "Overdue" not in text and "1. #7 Login UAT" in text
+
+
+def test_empty_tasks_reply_explains_the_rule():
+    from daily_task_bot.services.chat_events import tasks_text
+    text = tasks_text([], TODAY, 7)
+    assert "no overdue tasks and none due in the next 7 days" in text
+    assert "no due date are not listed" in text
 
 
 async def test_closing_a_task_removes_it_from_the_list():
-    t1 = wp(1, start=date(2026, 11, 20), due=date(2026, 11, 30))
-    t2 = wp(2, start=date(2026, 11, 25), due=date(2026, 12, 5))
+    t1 = wp(1, start=date(2026, 11, 20), due=date(2026, 11, 27))
+    t2 = wp(2, start=date(2026, 11, 25), due=date(2026, 11, 28))
     before = await open_tasks_for(FakeOpenProject([t1, t2]), employee(), Settings(), TODAY)
     assert [t.work_package_id for t in before] == [1, 2]
 
