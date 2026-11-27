@@ -10,6 +10,7 @@ Security:
 """
 
 import logging
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -30,7 +31,13 @@ from daily_task_bot.domain.chat_cards import (
     task_sections,
 )
 from daily_task_bot.domain.chat_commands import HELP_TEXT, parse_command
-from daily_task_bot.domain.task_window import OVERDUE, TaskRules, is_completed, window_group
+from daily_task_bot.domain.task_window import (
+    OVERDUE,
+    TaskRules,
+    is_completed,
+    is_missing_dates,
+    window_group,
+)
 from daily_task_bot.services.dsr import (
     DsrConflictError,
     DsrValidationError,
@@ -106,30 +113,73 @@ def find_employee(session: Session, event: dict[str, Any]) -> Employee | None:
     return employee
 
 
-async def open_tasks_for(op_client: Any, employee: Employee, settings: Settings, today: date) -> list[CardTask]:
-    """Tasks for the DSR card, TASKS, UPDATE and STATUS: the employee's open tasks that are overdue
-    or due within the window (task_window_days, counting today). Tasks with no due date are not listed.
+@dataclass(frozen=True)
+class TaskOverview:
+    listed: list[CardTask]  # overdue, then due soon; the numbers TASKS, UPDATE and STATUS use
+    missing_dates: list[CardTask]  # open tasks not listed because a start or due date is not set
 
-    Order: overdue first, then due soon; each by due date, then ID. UPDATE and STATUS numbers follow it.
+
+async def task_overview(op_client: Any, employee: Employee, settings: Settings, today: date) -> TaskOverview:
+    """The employee's open tasks, split into the listed ones and the ones that need dates.
+
+    Listed: overdue or due within the window (task_window_days, counting today), overdue first, then
+    due soon; each by due date, then ID. Missing dates: open tasks not listed whose start or due date
+    is not set, by ID. Tasks due after the window (with both dates set) are in neither list.
     """
     statuses = await op_client.get_statuses()
     packages = await op_client.get_open_work_packages(
         statuses, settings.openproject_project_ids or None, assignee_id=employee.openproject_user_id,
     )
     rules = TaskRules.from_settings(settings)
-    listed = [(window_group(wp, today, rules), wp) for wp in packages
-              if wp.assignee_id == employee.openproject_user_id]
-    listed = [(group, wp) for group, wp in listed if group is not None]
-    listed.sort(key=lambda gw: (gw[0] != OVERDUE, gw[1].due_date, gw[1].id))
-    return [CardTask(wp.id, wp.subject, wp.status_name, wp.due_date, group) for group, wp in listed]
+    mine = [wp for wp in packages if wp.assignee_id == employee.openproject_user_id]
+    grouped = [(window_group(wp, today, rules), wp) for wp in mine]
+    listed = sorted(((g, wp) for g, wp in grouped if g is not None),
+                    key=lambda gw: (gw[0] != OVERDUE, gw[1].due_date, gw[1].id))
+    listed_ids = {wp.id for _, wp in listed}
+    undated = sorted((wp for wp in mine if wp.id not in listed_ids and is_missing_dates(wp, rules)),
+                     key=lambda wp: wp.id)
+    return TaskOverview(
+        listed=[CardTask(wp.id, wp.subject, wp.status_name, wp.due_date, g) for g, wp in listed],
+        missing_dates=[CardTask(wp.id, wp.subject, wp.status_name) for wp in undated],
+    )
+
+
+async def open_tasks_for(op_client: Any, employee: Employee, settings: Settings, today: date) -> list[CardTask]:
+    """The listed tasks only (see task_overview). UPDATE and STATUS numbers follow this order."""
+    return (await task_overview(op_client, employee, settings, today)).listed
+
+
+MISSING_DATES_SHOWN = 10  # keep the note short; the rest are counted
+
+
+def missing_dates_note(tasks: list[CardTask]) -> str | None:
+    """A note naming the person's open tasks that have no start or due date. None when there are none."""
+    if not tasks:
+        return None
+    count = len(tasks)
+    noun = "task has" if count == 1 else "tasks have"
+    lines = [(f"Missing dates: {count} of your open {noun} no start or due date in OpenProject, so "
+              f"{'it is' if count == 1 else 'they are'} not listed. Please add both dates in OpenProject:")]
+    lines += [f"- #{t.work_package_id} {t.subject} ({t.status_name})" for t in tasks[:MISSING_DATES_SHOWN]]
+    if count > MISSING_DATES_SHOWN:
+        lines.append(f"...and {count - MISSING_DATES_SHOWN} more.")
+    return "\n".join(lines)
 
 
 def _day(value: date) -> str:
     return f"{value.day} {value.strftime('%b')}"
 
 
-def tasks_text(tasks: list[CardTask], today: date, window_days: int) -> str:
-    """The TASKS reply: an Overdue section, then a Due soon section, numbered straight through."""
+def tasks_text(tasks: list[CardTask], today: date, window_days: int,
+               missing_dates: list[CardTask] | None = None) -> str:
+    """The TASKS reply: an Overdue section, then a Due soon section, numbered straight through,
+    then a note naming open tasks that are not listed because they have no start or due date."""
+    note = missing_dates_note(missing_dates or [])
+    body = _listed_text(tasks, today, window_days)
+    return f"{body}\n\n{note}" if note else body
+
+
+def _listed_text(tasks: list[CardTask], today: date, window_days: int) -> str:
     if not tasks:
         return (f"You have no overdue tasks and none due in the next {window_days} days. A task is listed "
                 "when it is assigned to you in OpenProject, not completed, and its due date is past or within "
@@ -155,12 +205,14 @@ async def status_choices_for(op_client: Any, settings: Settings) -> list[StatusC
 
 async def dsr_card_for(session: Session, op_client: Any, settings: Settings, employee: Employee,
                        today: date) -> dict[str, Any]:
+    overview = await task_overview(op_client, employee, settings, today)
     return build_dsr_card(
         employee_name=employee.name,
         dsr_date=today,
-        tasks=await open_tasks_for(op_client, employee, settings, today),
+        tasks=overview.listed,
         status_choices=await status_choices_for(op_client, settings),
         window_days=settings.task_window_days,
+        missing_dates=overview.missing_dates,
     )
 
 
@@ -395,9 +447,10 @@ async def handle_chat_event(
             return _text(HELP_TEXT)
         if command.name == "PREVIEW":
             return _text(await preview_text_for(session, op_client, employee, today))
-        tasks = await open_tasks_for(op_client, employee, settings, today)
         if command.name == "TASKS":
-            return _text(tasks_text(tasks, today, settings.task_window_days))
+            overview = await task_overview(op_client, employee, settings, today)
+            return _text(tasks_text(overview.listed, today, settings.task_window_days, overview.missing_dates))
+        tasks = await open_tasks_for(op_client, employee, settings, today)
         if command.name in ("UPDATE", "STATUS"):
             number = command.args["task"]
             if number > len(tasks):

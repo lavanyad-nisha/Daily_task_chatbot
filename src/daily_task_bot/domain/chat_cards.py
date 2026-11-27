@@ -44,6 +44,7 @@ class CardTask:
 
 
 OVERDUE_HEADER = "Overdue"
+MISSING_DATES_IDS_SHOWN = 15
 
 
 def due_label(day: date | None) -> str:
@@ -85,7 +86,7 @@ def _text(value: str) -> dict[str, Any]:
 
 def build_dsr_card(
     *, employee_name: str, dsr_date: date, tasks: list[CardTask], status_choices: list[StatusChoice],
-    window_days: int = 7,
+    window_days: int = 7, missing_dates: list[CardTask] | None = None,
 ) -> dict[str, Any]:
     """A cardsV2 message asking for today's DSR. Returns the message body.
 
@@ -97,6 +98,15 @@ def build_dsr_card(
     )]
     if not tasks:
         intro.append(_text(f"You have no overdue tasks and none due in the next {window_days} days."))
+    if missing_dates:
+        ids = ", ".join(f"#{t.work_package_id}" for t in missing_dates[:MISSING_DATES_IDS_SHOWN])
+        more = f" and {len(missing_dates) - MISSING_DATES_IDS_SHOWN} more" \
+            if len(missing_dates) > MISSING_DATES_IDS_SHOWN else ""
+        count = len(missing_dates)
+        intro.append(_text(
+            f"Missing dates: {count} of your open {'task has' if count == 1 else 'tasks have'} no start or due "
+            f"date, so {'it is' if count == 1 else 'they are'} not on this form ({ids}{more}). "
+            "Please add both dates in OpenProject. Type TASKS to see their names."))
     sections: list[dict[str, Any]] = [{"widgets": intro}]
     choice_items = [{"text": "No change", "value": NO_CHANGE, "selected": True}] + [
         {"text": c.name, "value": str(c.status_id), "selected": False} for c in status_choices

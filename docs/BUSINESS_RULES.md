@@ -61,6 +61,10 @@ the employee. Future-dated and overdue tasks are accepted.
 Tasks without a due date are not reminded or listed. To get one onto the list, set its due date in
 OpenProject.
 
+**Missing dates note.** `TASKS` ends with a note naming the person's open, not-completed tasks that are
+not listed because their start or due date is not set (up to 10 by name, then a count). The DSR card
+shows the same note with task IDs (up to 15). The bot does not send separate reminders for this.
+
 The earlier settings `DTB_SHOW_OVERDUE_TASKS` and `DTB_SHOW_UNDATED_TASKS` were removed. Reminders
 list only tasks due today.
 

@@ -127,3 +127,19 @@ def test_missing_audience_refuses_every_token():
 def test_a_malformed_token_is_refused_without_network():
     with pytest.raises(ChatAuthError):
         verify_chat_token("not-a-jwt", "https://example.test/chat")
+
+
+def test_card_names_tasks_missing_dates_by_id():
+    card = build_dsr_card(employee_name="Asha", dsr_date=DAY, status_choices=[],
+                          tasks=[CardTask(1, "Soon", "New", DAY, "DUE_SOON")],
+                          missing_dates=[CardTask(i, f"T{i}", "New") for i in range(1, 18)])
+    texts = [w["textParagraph"]["text"] for w in _widgets(card) if "textParagraph" in w]
+    note = next(t for t in texts if t.startswith("Missing dates"))
+    assert "17 of your open tasks have no start or due date" in note
+    assert "#15 and 2 more" in note and "#16" not in note
+    assert "Type TASKS to see their names." in note
+
+
+def test_card_has_no_missing_dates_note_when_there_are_none():
+    texts = [w.get("textParagraph", {}).get("text", "") for w in _widgets(_card([2481]))]
+    assert not any(t.startswith("Missing dates") for t in texts)

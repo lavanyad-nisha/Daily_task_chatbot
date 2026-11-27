@@ -7,6 +7,8 @@ Rules (see docs/BUSINESS_RULES.md, "Task eligibility and reminders"):
 - Listed (TASKS, DSR card, UPDATE/STATUS numbers): eligible and has a due date that is either past
   (OVERDUE section) or within the next TaskRules.window_days days counting today (DUE_SOON section).
   Tasks with no due date, or due later, are not listed.
+- Missing dates: eligible but with no start date or no due date. These are named in a note under
+  TASKS and on the DSR card, so the person adds the dates in OpenProject.
 - Due for a reminder: eligible and due on that day (due date equals the day, Asia/Kolkata).
 
 Pure functions; no I/O.
@@ -68,6 +70,11 @@ def window_group(wp: _Task, day: date, rules: TaskRules = DEFAULT_RULES) -> str 
     if wp.due_date < day + timedelta(days=rules.window_days):
         return DUE_SOON
     return None
+
+
+def is_missing_dates(wp: _Task, rules: TaskRules = DEFAULT_RULES) -> bool:
+    """Eligible, but the start date or the due date is not set."""
+    return is_eligible(wp, rules) and (wp.start_date is None or wp.due_date is None)
 
 
 def is_due_on(wp: _Task, day: date, rules: TaskRules = DEFAULT_RULES) -> bool:

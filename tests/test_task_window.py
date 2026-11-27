@@ -189,3 +189,53 @@ async def test_submission_refuses_a_task_assigned_to_someone_else():
     packages = [wp(1, assignee=6)]
     problems = await _validate_tasks(FakeOpenProject(packages), employee(), [1], TODAY)
     assert problems == ["#1 is not assigned to you"]
+
+
+# ---- missing dates note ---------------------------------------------------------------------
+
+async def test_overview_names_open_tasks_missing_a_start_or_due_date():
+    from daily_task_bot.services.chat_events import task_overview
+    packages = [
+        wp(1, due=TODAY),                                    # listed
+        wp(2, start=None, due=None),                         # no dates: missing
+        wp(3, start=date(2026, 11, 1), due=None),            # no due date: missing
+        wp(4, start=None, due=None, status_id=10),           # completed: neither
+        wp(5, start=None, due=None, assignee=6),             # someone else: neither
+        wp(6, start=date(2026, 12, 1), due=date(2026, 12, 9)),  # dated, due later: neither
+        wp(7, start=None, due=date(2026, 11, 26)),           # due soon, no start: listed only
+    ]
+    overview = await task_overview(FakeOpenProject(packages), employee(), Settings(), TODAY)
+    assert [t.work_package_id for t in overview.listed] == [1, 7]
+    assert [t.work_package_id for t in overview.missing_dates] == [2, 3]
+
+
+def test_tasks_reply_ends_with_the_missing_dates_note():
+    from daily_task_bot.domain.chat_cards import CardTask
+    from daily_task_bot.services.chat_events import tasks_text
+    text = tasks_text([CardTask(7, "Login UAT", "In progress", TODAY, "DUE_SOON")], TODAY, 7,
+                      [CardTask(2, "Old story", "Test failed")])
+    assert text.endswith("\n\nMissing dates: 1 of your open task has no start or due date in OpenProject, "
+                         "so it is not listed. Please add both dates in OpenProject:\n"
+                         "- #2 Old story (Test failed)")
+
+
+def test_missing_dates_note_shows_ten_and_counts_the_rest():
+    from daily_task_bot.domain.chat_cards import CardTask
+    from daily_task_bot.services.chat_events import missing_dates_note
+    note = missing_dates_note([CardTask(i, f"T{i}", "New") for i in range(1, 14)])
+    assert note.startswith("Missing dates: 13 of your open tasks have")
+    assert "- #10 T10 (New)" in note and "#11" not in note
+    assert note.endswith("...and 3 more.")
+
+
+def test_no_note_when_every_task_has_dates():
+    from daily_task_bot.services.chat_events import missing_dates_note, tasks_text
+    assert missing_dates_note([]) is None
+    assert "Missing dates" not in tasks_text([], TODAY, 7, [])
+
+
+def test_note_still_shows_when_nothing_is_listed():
+    from daily_task_bot.domain.chat_cards import CardTask
+    from daily_task_bot.services.chat_events import tasks_text
+    text = tasks_text([], TODAY, 7, [CardTask(2, "Old story", "New")])
+    assert text.startswith("You have no overdue tasks") and "- #2 Old story (New)" in text
