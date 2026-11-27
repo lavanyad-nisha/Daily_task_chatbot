@@ -103,6 +103,7 @@ and NEW-then-seen cases.
   or more spaces is `ambiguous`. Neither is guessed.
 - **Flagged entries are held for review.** They do not stop routed entries.
 - **`PREVIEW` shows the routing** of today's saved entries, grouped by space. It sends nothing.
+- Daily project posts run after 20:30 local time (`DTB_ROUTED_POST_TIME`, default `20:30`), because employees work until 20:30. They run in the background loop, and a post made earlier is never repeated.
 - Posting is still as the bot. Posting as the employee is not built.
 
 ## Client spaces (T1; tests in `tests/test_space_links.py`)

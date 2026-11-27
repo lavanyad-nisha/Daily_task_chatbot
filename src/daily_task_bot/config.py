@@ -67,8 +67,8 @@ class Settings(BaseSettings):
     # A space belongs to one client and a client to one space. Env: DTB_CLIENTS='{"GPL":16,...}'
     clients: dict[str, int] = Field(default_factory=lambda: {"GPL": 16, "L&T Valves": 18, "TVS": 27})
     evening_reminder_time: str = "18:00"
-    # Local time (HH:MM) after which the day's routed project posts are sent, once per day.
-    routed_post_time: str = "18:30"
+    # Local time (HH:MM) after which the day's routed project posts are sent. Employees work until 20:30.
+    routed_post_time: str = "20:30"
 
     # Employee and leave data (local files until directory / calendar access is approved)
     employees_file: Path = Path("config/employees.json")

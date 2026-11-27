@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parent.parent
 OP_USER = 90101
 CHAT_USER = "users/90101"
 SPACE = "spaces/ROUTEJOB"
-NOW_DUE = datetime(2026, 11, 25, 13, 30, tzinfo=UTC)  # 19:00 in Asia/Kolkata
+NOW_DUE = datetime(2026, 11, 25, 15, 30, tzinfo=UTC)  # 21:00 in Asia/Kolkata (after 20:30)
 NOW_EARLY = datetime(2026, 11, 25, 12, 0, tzinfo=UTC)  # 17:30 in Asia/Kolkata
 DAY = date(2026, 11, 25)
 
@@ -51,7 +51,7 @@ class FakeChat:
 
 def _settings(**overrides):
     base = dict(_env_file=None, pilot_chat_user_ids=[CHAT_USER], allow_external_writes=True, dry_run=True,
-                timezone="Asia/Kolkata", routed_post_time="18:30")
+                timezone="Asia/Kolkata", routed_post_time="20:30")
     base.update(overrides)
     return Settings(**base)
 
@@ -142,8 +142,11 @@ def test_second_live_run_the_same_day_does_not_post_again(world):
 
 def test_routed_post_time_gate():
     settings = _settings()
-    assert not is_due(settings, NOW_EARLY)
-    assert is_due(settings, NOW_DUE)
+    assert not is_due(settings, NOW_EARLY)  # 17:30 IST
+    assert not is_due(settings, datetime(2026, 11, 25, 13, 30, tzinfo=UTC))  # 19:00 IST
+    assert not is_due(settings, datetime(2026, 11, 25, 14, 30, tzinfo=UTC))  # 20:00 IST
+    assert is_due(settings, datetime(2026, 11, 25, 15, 0, tzinfo=UTC))  # 20:30 IST
+    assert is_due(settings, NOW_DUE)  # 21:00 IST
 
 
 class CountingSummarizer:
