@@ -309,3 +309,56 @@ def test_non_admin_adding_the_app_with_link_is_refused(session):
 def test_other_text_while_adding_the_app_gets_the_greeting(session):
     reply = _run(session, _added_with_message("TASKS"))
     assert "@InsightBot LINK [client]" in reply["text"]
+
+
+# ---- @mention text (the bot's name is in the text, not the command) -----------------------
+
+def test_mention_text_uses_argument_text_when_chat_sends_it():
+    event = {"message": {"text": "@Daily Task Bot LINK GPL", "argumentText": " LINK GPL"}}
+    assert message_text(event) == "LINK GPL"
+
+
+def test_mention_text_removed_from_annotations_when_argument_text_is_missing():
+    text = "@Daily Task Bot LINKED"
+    event = {"message": {"text": text, "annotations": [
+        {"type": "USER_MENTION", "startIndex": 0, "length": 15,
+         "userMention": {"user": {"name": "users/1", "type": "BOT"}}}]}}
+    assert message_text(event) == "LINKED"
+
+
+def test_mention_text_removed_by_name_when_no_annotations_are_sent():
+    assert message_text({"message": {"text": "@Daily Task Bot UNLINK"}}) == "UNLINK"
+
+
+def test_plain_direct_message_text_is_unchanged():
+    assert message_text({"message": {"text": "TASKS"}}) == "TASKS"
+
+
+@pytestmark_db
+def test_link_works_when_only_the_mention_text_arrives(session):
+    event = {"type": "MESSAGE", "user": {"name": ADMIN}, "space": {"name": SPACE, "spaceType": "SPACE"},
+             "message": {"text": "@Daily Task Bot LINK GPL"}}
+    reply = _run(session, event)
+    assert reply["text"] == "Linked this space to GPL."
+
+
+def test_mention_text_uses_the_insightbot_name():
+    assert message_text({"message": {"text": "@InsightBot LINK GPL"}}) == "LINK GPL"
+
+
+def test_annotation_indexes_count_leading_spaces():
+    event = {"message": {"text": "  @InsightBot LINKED", "annotations": [
+        {"type": "USER_MENTION", "startIndex": 2, "length": 11,
+         "userMention": {"user": {"name": "users/1", "type": "BOT"}}}]}}
+    assert message_text(event) == "LINKED"
+
+
+def test_bad_annotation_indexes_fall_back_to_the_name():
+    event = {"message": {"text": "@InsightBot UNLINK", "annotations": [
+        {"type": "USER_MENTION", "startIndex": 5, "length": 99,
+         "userMention": {"user": {"name": "users/1", "type": "BOT"}}}]}}
+    assert message_text(event) == "UNLINK"
+
+
+def test_a_longer_word_is_not_taken_for_the_bot_name():
+    assert message_text({"message": {"text": "@InsightBotty LINK GPL"}}) == "@InsightBotty LINK GPL"

@@ -206,17 +206,42 @@ SPACE_ADMIN_COMMANDS = frozenset({"LINK", "UNLINK"})
 SPACE_COMMANDS = SPACE_ADMIN_COMMANDS | {"LINKED"}
 
 
+# Names the app has been shown as in Chat. Used only when Chat sends neither argumentText nor a mention.
+BOT_MENTION_NAMES = ("InsightBot", "Daily Task Bot")
+
+
 def message_text(event: dict[str, Any]) -> str:
     """The command text without the bot @mention.
 
     In a space the message must @mention the bot, and message.text then starts with
-    "@Daily Task Bot". Chat puts the text without the mention in message.argumentText.
+    "@InsightBot". Chat puts the text without the mention in message.argumentText.
+    If argumentText is missing, the bot's mention is cut out using the message annotations,
+    and failing that, a leading "@<bot name>" is removed.
     """
     message = event.get("message") or {}
     argument_text = message.get("argumentText")
     if isinstance(argument_text, str) and argument_text.strip():
         return argument_text.strip()
-    return (message.get("text") or "").strip()
+    raw = message.get("text") or ""
+    for annotation in message.get("annotations") or []:
+        user = (annotation.get("userMention") or {}).get("user") or {}
+        if annotation.get("type") == "USER_MENTION" and user.get("type") == "BOT":
+            try:
+                start, length = int(annotation.get("startIndex") or 0), int(annotation.get("length") or 0)
+            except (TypeError, ValueError):
+                break
+            # Indexes refer to the unstripped text, so cut before stripping.
+            if 0 <= start and length > 0 and start + length <= len(raw):
+                return (raw[:start] + raw[start + length:]).strip()
+            break
+    text = raw.strip()
+    for name in BOT_MENTION_NAMES:
+        mention = f"@{name}"
+        if text.casefold().startswith(mention.casefold()):
+            rest = text[len(mention):]
+            if not rest or rest[0].isspace():  # "@InsightBot LINK", not "@InsightBotty"
+                return rest.strip()
+    return text
 
 
 def is_private_chat(event: dict[str, Any]) -> bool:
