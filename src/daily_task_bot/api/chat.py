@@ -11,6 +11,7 @@ Both event formats are accepted:
 """
 
 import logging
+import re
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
@@ -26,6 +27,28 @@ router = APIRouter()
 log = logging.getLogger("uvicorn.error")
 
 FAILURE_TEXT = "Sorry, something went wrong on my side. Please try again in a few minutes."
+
+# Chat reads <...> in message text as a link (<https://x|label>) or a mention (<users/123>).
+# Anything else in angle brackets makes Chat reject the whole reply ("invalidContent").
+_CHAT_MARKUP = re.compile(r"<(?:https?://|mailto:|users/)[^<>]*>")
+
+
+def safe_chat_text(text: str) -> str:
+    """Replace angle brackets that are not Chat links or mentions, so the reply is not rejected."""
+    parts = []
+    last = 0
+    for match in _CHAT_MARKUP.finditer(text):
+        parts.append(text[last:match.start()].replace("<", "‹").replace(">", "›"))
+        parts.append(match.group(0))
+        last = match.end()
+    parts.append(text[last:].replace("<", "‹").replace(">", "›"))
+    return "".join(parts)
+
+
+def _safe_body(body: dict[str, Any]) -> dict[str, Any]:
+    if isinstance(body.get("text"), str):
+        return {**body, "text": safe_chat_text(body["text"])}
+    return body
 
 
 def _bearer(authorization: str | None) -> str:
@@ -64,6 +87,7 @@ async def chat_event(
             log.exception("chat event failed (type=%s)", event.get("type"))
             body = {"text": FAILURE_TEXT}
 
+    body = _safe_body(body)
     if addon:
         return to_addon_response(body, settings.chat_endpoint_audience, event.get("type"))
     return body
