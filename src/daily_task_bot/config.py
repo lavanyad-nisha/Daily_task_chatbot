@@ -66,8 +66,7 @@ class Settings(BaseSettings):
     # Clients a space can be linked to, with each client's OpenProject parent project ID.
     # A space belongs to one client and a client to one space. Env: DTB_CLIENTS='{"GPL":16,...}'
     clients: dict[str, int] = Field(default_factory=lambda: {"GPL": 16, "L&T Valves": 18, "TVS": 27})
-    # Standard end-of-day time (employees work until 20:30): the DSR reminder and the daily project posts.
-    evening_reminder_time: str = "20:30"
+    evening_reminder_time: str = "18:00"
     # Local time (HH:MM) after which the day's routed project posts are sent. Employees work until 20:30.
     routed_post_time: str = "20:30"
 
