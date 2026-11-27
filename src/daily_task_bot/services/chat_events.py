@@ -204,6 +204,9 @@ SPACE_ADMIN_COMMANDS = frozenset({"LINK", "UNLINK"})
 SPACE_COMMANDS = SPACE_ADMIN_COMMANDS | {"LINKED"}
 
 
+BOT_DISPLAY_NAME = "Daily Task Bot"
+
+
 def message_text(event: dict[str, Any]) -> str:
     """The command text without the bot @mention.
 
@@ -214,7 +217,19 @@ def message_text(event: dict[str, Any]) -> str:
     argument_text = message.get("argumentText")
     if isinstance(argument_text, str) and argument_text.strip():
         return argument_text.strip()
-    return (message.get("text") or "").strip()
+    text = (message.get("text") or "").strip()
+    # Some add-on events omit argumentText. Remove the bot mention from the text instead.
+    for annotation in message.get("annotations") or []:
+        user = ((annotation.get("userMention") or {}).get("user") or {})
+        if annotation.get("type") == "USER_MENTION" and user.get("type") == "BOT":
+            start = int(annotation.get("startIndex") or 0)
+            length = int(annotation.get("length") or 0)
+            text = (text[:start] + text[start + length:]).strip()
+            break
+    mention = f"@{BOT_DISPLAY_NAME}"
+    if text.casefold().startswith(mention.casefold()):
+        text = text[len(mention):].strip()
+    return text
 
 
 def is_private_chat(event: dict[str, Any]) -> bool:

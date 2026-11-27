@@ -273,3 +273,36 @@ def test_ordinary_text_in_a_space_gets_no_reply(session):
 def test_admin_command_with_no_client_gets_the_usage_message(session):
     reply = _run(session, _space_event("LINK"))
     assert reply["text"] == "Use: LINK <client>"
+
+
+# ---- @mention text (the bot's name is in the text, not the command) -----------------------
+
+
+
+def test_mention_text_uses_argument_text_when_chat_sends_it():
+    event = {"message": {"text": "@Daily Task Bot LINK GPL", "argumentText": " LINK GPL"}}
+    assert message_text(event) == "LINK GPL"
+
+
+def test_mention_text_removed_from_annotations_when_argument_text_is_missing():
+    text = "@Daily Task Bot LINKED"
+    event = {"message": {"text": text, "annotations": [
+        {"type": "USER_MENTION", "startIndex": 0, "length": 15,
+         "userMention": {"user": {"name": "users/1", "type": "BOT"}}}]}}
+    assert message_text(event) == "LINKED"
+
+
+def test_mention_text_removed_by_name_when_no_annotations_are_sent():
+    assert message_text({"message": {"text": "@Daily Task Bot UNLINK"}}) == "UNLINK"
+
+
+def test_plain_direct_message_text_is_unchanged():
+    assert message_text({"message": {"text": "TASKS"}}) == "TASKS"
+
+
+@pytestmark_db
+def test_link_works_when_only_the_mention_text_arrives(session):
+    event = {"type": "MESSAGE", "user": {"name": ADMIN}, "space": {"name": SPACE, "type": "SPACE"},
+             "message": {"text": "@Daily Task Bot LINK GPL"}}
+    reply = _run(session, event)
+    assert reply["text"] == "Linked this space to GPL."
