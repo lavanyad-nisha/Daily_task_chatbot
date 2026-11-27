@@ -62,7 +62,7 @@ def test_parser_reads_unlink_and_linked():
 
 def test_parser_refuses_link_without_a_client():
     cmd = parse_command("LINK")
-    assert cmd.error == "Use: LINK <client>"
+    assert cmd.error == "Use: LINK [client]"
 
 
 # ---- message text and chat type (no database) -------------------------------------------
@@ -100,7 +100,7 @@ def test_spaces_group_chats_and_unknown_types_are_not_private(space):
 def test_added_to_a_space_asks_for_link_not_dsr():
     event = {"type": "ADDED_TO_SPACE", "space": {"name": SPACE, "spaceType": "SPACE"}}
     reply = asyncio.run(handle_chat_event(event, session=None, op_client=None, settings=_settings()))
-    assert "LINK <client>" in reply["text"] and "Type DSR" not in reply["text"]
+    assert "@InsightBot LINK [client]" in reply["text"] and "Type DSR" not in reply["text"]
 
 
 def test_added_to_a_dm_keeps_the_dsr_greeting():
@@ -272,12 +272,46 @@ def test_ordinary_text_in_a_space_gets_no_reply(session):
 @pytestmark_db
 def test_admin_command_with_no_client_gets_the_usage_message(session):
     reply = _run(session, _space_event("LINK"))
-    assert reply["text"] == "Use: LINK <client>"
+    assert reply["text"] == "Use: LINK [client]"
+
+
+# ---- added to a space by @mentioning the app with a command --------------------------------
+
+def _added_with_message(text, user=ADMIN):
+    return {"type": "ADDED_TO_SPACE", "user": {"name": user},
+            "space": {"name": SPACE, "spaceType": "SPACE"},
+            "message": {"text": f"@Daily Task Bot {text}", "argumentText": f" {text}"}}
+
+
+def test_addon_added_to_space_event_keeps_the_message():
+    from daily_task_bot.api.addon import to_chat_event
+    raw = {"chat": {"user": {"name": ADMIN}, "addedToSpacePayload": {
+        "space": {"name": SPACE, "spaceType": "SPACE"},
+        "message": {"text": "@Daily Task Bot LINK GPL", "argumentText": " LINK GPL"}}}}
+    event = to_chat_event(raw)
+    assert event["type"] == "ADDED_TO_SPACE" and message_text(event) == "LINK GPL"
+
+
+@pytestmark_db
+def test_link_sent_while_adding_the_app_links_the_space(session):
+    assert _run(session, _added_with_message("LINK GPL"))["text"] == "Linked this space to GPL."
+    assert _rows(session)[0].client_name == "GPL"
+
+
+@pytestmark_db
+def test_non_admin_adding_the_app_with_link_is_refused(session):
+    reply = _run(session, _added_with_message("LINK GPL", user=MEMBER))
+    assert reply["text"] == "Only bot admins can link or unlink this space."
+    assert _rows(session) == []
+
+
+@pytestmark_db
+def test_other_text_while_adding_the_app_gets_the_greeting(session):
+    reply = _run(session, _added_with_message("TASKS"))
+    assert "@InsightBot LINK [client]" in reply["text"]
 
 
 # ---- @mention text (the bot's name is in the text, not the command) -----------------------
-
-
 
 def test_mention_text_uses_argument_text_when_chat_sends_it():
     event = {"message": {"text": "@Daily Task Bot LINK GPL", "argumentText": " LINK GPL"}}
@@ -302,7 +336,29 @@ def test_plain_direct_message_text_is_unchanged():
 
 @pytestmark_db
 def test_link_works_when_only_the_mention_text_arrives(session):
-    event = {"type": "MESSAGE", "user": {"name": ADMIN}, "space": {"name": SPACE, "type": "SPACE"},
+    event = {"type": "MESSAGE", "user": {"name": ADMIN}, "space": {"name": SPACE, "spaceType": "SPACE"},
              "message": {"text": "@Daily Task Bot LINK GPL"}}
     reply = _run(session, event)
     assert reply["text"] == "Linked this space to GPL."
+
+
+def test_mention_text_uses_the_insightbot_name():
+    assert message_text({"message": {"text": "@InsightBot LINK GPL"}}) == "LINK GPL"
+
+
+def test_annotation_indexes_count_leading_spaces():
+    event = {"message": {"text": "  @InsightBot LINKED", "annotations": [
+        {"type": "USER_MENTION", "startIndex": 2, "length": 11,
+         "userMention": {"user": {"name": "users/1", "type": "BOT"}}}]}}
+    assert message_text(event) == "LINKED"
+
+
+def test_bad_annotation_indexes_fall_back_to_the_name():
+    event = {"message": {"text": "@InsightBot UNLINK", "annotations": [
+        {"type": "USER_MENTION", "startIndex": 5, "length": 99,
+         "userMention": {"user": {"name": "users/1", "type": "BOT"}}}]}}
+    assert message_text(event) == "UNLINK"
+
+
+def test_a_longer_word_is_not_taken_for_the_bot_name():
+    assert message_text({"message": {"text": "@InsightBotty LINK GPL"}}) == "@InsightBotty LINK GPL"

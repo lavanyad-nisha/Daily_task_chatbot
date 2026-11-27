@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parent.parent
 OP_USER = 90101
 CHAT_USER = "users/90101"
 SPACE = "spaces/ROUTEJOB"
-NOW_DUE = datetime(2026, 11, 25, 13, 30, tzinfo=UTC)  # 19:00 in Asia/Kolkata
+NOW_DUE = datetime(2026, 11, 25, 15, 30, tzinfo=UTC)  # 21:00 in Asia/Kolkata (after 20:30)
 NOW_EARLY = datetime(2026, 11, 25, 12, 0, tzinfo=UTC)  # 17:30 in Asia/Kolkata
 DAY = date(2026, 11, 25)
 
@@ -51,7 +51,7 @@ class FakeChat:
 
 def _settings(**overrides):
     base = dict(_env_file=None, pilot_chat_user_ids=[CHAT_USER], allow_external_writes=True, dry_run=True,
-                timezone="Asia/Kolkata", routed_post_time="18:30")
+                timezone="Asia/Kolkata", routed_post_time="20:30")
     base.update(overrides)
     return Settings(**base)
 
@@ -142,8 +142,11 @@ def test_second_live_run_the_same_day_does_not_post_again(world):
 
 def test_routed_post_time_gate():
     settings = _settings()
-    assert not is_due(settings, NOW_EARLY)
-    assert is_due(settings, NOW_DUE)
+    assert not is_due(settings, NOW_EARLY)  # 17:30 IST
+    assert not is_due(settings, datetime(2026, 11, 25, 13, 30, tzinfo=UTC))  # 19:00 IST
+    assert not is_due(settings, datetime(2026, 11, 25, 14, 30, tzinfo=UTC))  # 20:00 IST
+    assert is_due(settings, datetime(2026, 11, 25, 15, 0, tzinfo=UTC))  # 20:30 IST
+    assert is_due(settings, NOW_DUE)  # 21:00 IST
 
 
 class CountingSummarizer:
@@ -191,3 +194,38 @@ def test_live_runs_repeat_after_the_post_time_and_dry_runs_do_not():
 def test_summary_call_has_a_short_timeout():
     from daily_task_bot.services.routing_job import SUMMARY_TIMEOUT_SECONDS
     assert SUMMARY_TIMEOUT_SECONDS <= 60
+
+
+class _AiOk:
+    def summarize(self, text):
+        return "AI summary of the update."
+
+
+class _AiDown:
+    def summarize(self, text):
+        raise RuntimeError("service unavailable")
+
+
+def _run_with(world, summarizer):
+    chat = FakeChat()
+    report = asyncio.run(run_routing_cycle(world["factory"], _settings(dry_run=False), FakeOpenProject(), chat,
+                                           now=NOW_DUE, summarizer=summarizer))
+    return report, chat
+
+
+@pytestmark_db
+def test_live_post_records_that_the_ai_made_the_summary(world):
+    report, chat = _run_with(world, _AiOk())
+    assert report["posted"] == 1
+    assert "AI summary of the update." in chat.posts[0][1]
+    row = world["session"].scalar(select(RoutedPost))
+    assert row.ai_summaries == 1 and row.rule_based_summaries == 0
+
+
+@pytestmark_db
+def test_live_post_records_rule_based_when_the_ai_failed_for_that_summary(world):
+    report, chat = _run_with(world, _AiDown())
+    assert report["posted"] == 1
+    assert "Login UAT passed on staging." in chat.posts[0][1]
+    row = world["session"].scalar(select(RoutedPost))
+    assert row.ai_summaries == 0 and row.rule_based_summaries == 1

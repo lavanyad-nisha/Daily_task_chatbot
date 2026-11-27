@@ -107,7 +107,9 @@ def find_employee(session: Session, event: dict[str, Any]) -> Employee | None:
 async def open_tasks_for(op_client: Any, employee: Employee, settings: Settings, today: date) -> list[CardTask]:
     """Tasks for the DSR card and TASKS: every open task assigned to the employee, on any date."""
     statuses = await op_client.get_statuses()
-    packages = await op_client.get_open_work_packages(statuses, settings.openproject_project_ids or None)
+    packages = await op_client.get_open_work_packages(
+        statuses, settings.openproject_project_ids or None, assignee_id=employee.openproject_user_id,
+    )
     rules = TaskRules.from_settings(settings)
     return [
         CardTask(wp.id, wp.subject, _status_label(wp, today))
@@ -204,31 +206,41 @@ SPACE_ADMIN_COMMANDS = frozenset({"LINK", "UNLINK"})
 SPACE_COMMANDS = SPACE_ADMIN_COMMANDS | {"LINKED"}
 
 
-BOT_DISPLAY_NAME = "Daily Task Bot"
+# Names the app has been shown as in Chat. Used only when Chat sends neither argumentText nor a mention.
+BOT_MENTION_NAMES = ("InsightBot", "Daily Task Bot")
 
 
 def message_text(event: dict[str, Any]) -> str:
     """The command text without the bot @mention.
 
     In a space the message must @mention the bot, and message.text then starts with
-    "@Daily Task Bot". Chat puts the text without the mention in message.argumentText.
+    "@InsightBot". Chat puts the text without the mention in message.argumentText.
+    If argumentText is missing, the bot's mention is cut out using the message annotations,
+    and failing that, a leading "@<bot name>" is removed.
     """
     message = event.get("message") or {}
     argument_text = message.get("argumentText")
     if isinstance(argument_text, str) and argument_text.strip():
         return argument_text.strip()
-    text = (message.get("text") or "").strip()
-    # Some add-on events omit argumentText. Remove the bot mention from the text instead.
+    raw = message.get("text") or ""
     for annotation in message.get("annotations") or []:
-        user = ((annotation.get("userMention") or {}).get("user") or {})
+        user = (annotation.get("userMention") or {}).get("user") or {}
         if annotation.get("type") == "USER_MENTION" and user.get("type") == "BOT":
-            start = int(annotation.get("startIndex") or 0)
-            length = int(annotation.get("length") or 0)
-            text = (text[:start] + text[start + length:]).strip()
+            try:
+                start, length = int(annotation.get("startIndex") or 0), int(annotation.get("length") or 0)
+            except (TypeError, ValueError):
+                break
+            # Indexes refer to the unstripped text, so cut before stripping.
+            if 0 <= start and length > 0 and start + length <= len(raw):
+                return (raw[:start] + raw[start + length:]).strip()
             break
-    mention = f"@{BOT_DISPLAY_NAME}"
-    if text.casefold().startswith(mention.casefold()):
-        text = text[len(mention):].strip()
+    text = raw.strip()
+    for name in BOT_MENTION_NAMES:
+        mention = f"@{name}"
+        if text.casefold().startswith(mention.casefold()):
+            rest = text[len(mention):]
+            if not rest or rest[0].isspace():  # "@InsightBot LINK", not "@InsightBotty"
+                return rest.strip()
     return text
 
 
@@ -260,7 +272,12 @@ def _handle_space_rules(event: dict[str, Any], *, session: Session, settings: Se
             return _text("LINK, UNLINK and LINKED work inside the client's Chat space, not in a private chat.")
         return None
 
-    # Inside a Chat space
+    # Inside a Chat space. Log the shape (never the message text) so space problems can be diagnosed.
+    space = event.get("space") or {}
+    log.info("space event: type=%s space=%s spaceType=%s user=%s command=%s",
+             event.get("type"), space.get("name"), space.get("spaceType") or space.get("type"),
+             (event.get("user") or {}).get("name"), first_word if first_word in SPACE_COMMANDS
+             or first_word in PRIVATE_ONLY_COMMANDS else "-")
     if first_word in SPACE_COMMANDS:
         space_id = (event.get("space") or {}).get("name")
         if not space_id:
@@ -317,8 +334,13 @@ async def handle_chat_event(
 
     if kind == "ADDED_TO_SPACE":
         if not is_private_chat(event):
+            # Added by @mentioning the app with a command (e.g. "@Daily Task Bot LINK GPL"):
+            # answer the command, not only the greeting.
+            text = message_text(event)
+            if text and text.split()[0].upper() in SPACE_COMMANDS:
+                return _handle_space_rules(event, session=session, settings=settings) or {}
             return _text("Hi! I post updates here once this space is linked to a client. "
-                         "Ask a bot admin to type @Daily Task Bot LINK <client> here. "
+                         f"Ask a bot admin to type @{settings.bot_name} LINK [client] here. "
                          "For your own tasks and DSR, message me privately.")
         return _text("Hi! I send your daily task summary and collect your daily status report here. "
                      "Type DSR to open today's form.")

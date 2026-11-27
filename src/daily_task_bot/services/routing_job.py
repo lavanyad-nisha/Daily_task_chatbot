@@ -23,10 +23,14 @@ from daily_task_bot.services.chat_events import local_today
 from daily_task_bot.services.dsr_preview import PreviewLine
 from daily_task_bot.services.routed_posting import plan_routed_posts, send_plans
 from daily_task_bot.services.routing_sync import load_routes, roles_by_project, sync_employee_roles
-from daily_task_bot.services.summarizer import summarize
+from daily_task_bot.services.summarizer import (
+    AI_METHOD,
+    AI_TIMEOUT_SECONDS,
+    make_haiku_summarizer,
+    summarize,
+)
 
-
-SUMMARY_TIMEOUT_SECONDS = 30.0  # one slow AI call must not hold up the background loop
+SUMMARY_TIMEOUT_SECONDS = AI_TIMEOUT_SECONDS  # one slow AI call must not hold up the background loop
 
 
 def is_live(settings: Settings) -> bool:
@@ -118,11 +122,14 @@ async def run_routing_cycle(session_factory: sessionmaker, settings: Settings, o
                 continue
             report["employees"] += 1
             summaries = {}
+            method_of = {}
             for line in lines:
                 if line.work_package_id in pending_ids:
+                    # AI first for each summary; a failed one falls back to rule-based on its own.
                     # The SDK call is blocking; run it in a thread so the web server keeps answering.
                     result = await asyncio.to_thread(summarize, line.work_done, summarizer)
                     summaries[line.work_package_id] = result.text
+                    method_of[line.work_package_id] = result.method
             plan = plan_routed_posts(
                 employee_name=employee.name, dsr_date=day, lines=lines,
                 roles_by_project=roles, routes=routes, summaries=summaries,
@@ -134,8 +141,11 @@ async def run_routing_cycle(session_factory: sessionmaker, settings: Settings, o
             for outcome in outcomes:
                 action = outcome["action"]
                 if action == "posted":
+                    tasks = outcome.get("tasks") or []
+                    ai_count = sum(1 for wp in tasks if method_of.get(wp) == AI_METHOD)
                     session.add(RoutedPost(employee_id=employee.id, space_id=outcome["space"],
-                                           post_date=day, message_name=outcome.get("message")))
+                                           post_date=day, message_name=outcome.get("message"),
+                                           ai_summaries=ai_count, rule_based_summaries=len(tasks) - ai_count))
                     report["posted"] += 1
                 elif action == "would_post":
                     report["would_post"] += 1
@@ -162,13 +172,7 @@ async def run_routing_once(settings: Settings, session_factory: sessionmaker, *,
     gchat = GChatClient(settings.gchat_service_account_file)
     summarizer = None
     if settings.anthropic_api_key is not None:
-        import anthropic
-
-        from daily_task_bot.services.summarizer import HaikuSummarizer
-        summarizer = HaikuSummarizer(anthropic.Anthropic(
-            api_key=settings.anthropic_api_key.get_secret_value(),
-            timeout=SUMMARY_TIMEOUT_SECONDS, max_retries=1,
-        ))
+        summarizer = make_haiku_summarizer(settings.anthropic_api_key.get_secret_value())
     try:
         report = await run_routing_cycle(session_factory, settings, op_client, gchat, now=now, summarizer=summarizer)
         return {"status": "ran", **report}

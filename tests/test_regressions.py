@@ -81,7 +81,7 @@ class _OpenProjectMustNotBeCalled:
     async def get_statuses(self):
         raise AssertionError("live run without a Chat writer must fail before any fetch")
 
-    async def get_open_work_packages(self, statuses, project_ids=None):
+    async def get_open_work_packages(self, statuses, project_ids=None, assignee_id=None):
         raise AssertionError("live run without a Chat writer must fail before any fetch")
 
 
@@ -102,7 +102,7 @@ async def test_dry_run_without_chat_writer_still_renders():
         async def get_statuses(self):
             return {}
 
-        async def get_open_work_packages(self, statuses, project_ids=None):
+        async def get_open_work_packages(self, statuses, project_ids=None, assignee_id=None):
             return []
 
     employee = DomainEmployee(name="Asha", email="asha@example.com",

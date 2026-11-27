@@ -63,6 +63,23 @@ async def test_openproject_uses_basic_auth_open_filter_and_paginates(monkeypatch
     assert filters[0] == {"status_id": {"operator": "o", "values": []}}
     assert filters[1]["project"]["values"] == ["7"]
     assert route.call_count == 2
+    assert not any("assignee" in f for f in filters)
+
+
+@respx.mock
+async def test_openproject_filters_by_assignee_on_the_server_when_asked():
+    respx.get(f"{BASE}/api/v3/statuses").mock(return_value=httpx.Response(200, json=STATUSES))
+    page = {"total": 1, "_embedded": {"elements": [wp_element(10, 1, 5)]}}
+    route = respx.get(f"{BASE}/api/v3/work_packages").mock(return_value=httpx.Response(200, json=page))
+
+    async with OpenProjectClient(BASE, "secret-key") as op:
+        statuses = await op.get_statuses()
+        wps = await op.get_open_work_packages(statuses, assignee_id=5)
+
+    assert [w.id for w in wps] == [10]
+    filters = json.loads(route.calls[0].request.url.params["filters"])
+    assert {"assignee": {"operator": "=", "values": ["5"]}} in filters
+    assert route.call_count == 1
 
 
 class FakeOpenProject:
@@ -72,7 +89,7 @@ class FakeOpenProject:
     async def get_statuses(self):
         return {}
 
-    async def get_open_work_packages(self, statuses, project_ids=None):
+    async def get_open_work_packages(self, statuses, project_ids=None, assignee_id=None):
         return self._wps
 
 

@@ -39,3 +39,13 @@ def test_live_run_refused_when_external_writes_disabled():
     response = client.post("/internal/run", headers={"X-Run-Secret": "s"})
     assert response.status_code == 409
     assert "external writes are disabled" in response.json()["detail"]
+
+
+def test_avatar_is_served_as_a_png():
+    from fastapi.testclient import TestClient
+
+    from daily_task_bot.main import app
+    response = TestClient(app).get("/avatar.png")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    assert response.content[:8] == b"\x89PNG\r\n\x1a\n"
