@@ -205,3 +205,26 @@ def test_endpoint_refuses_foreign_signer(monkeypatch):
 
 def test_addon_module_has_no_io():
     assert not hasattr(addon, "httpx")
+
+
+# ---- reply text Chat would reject ------------------------------------------------------------
+
+def test_placeholder_brackets_are_replaced_so_chat_accepts_the_reply():
+    from daily_task_bot.api.chat import safe_chat_text
+    assert safe_chat_text("Use: LINK <client>") == "Use: LINK ‹client›"
+    assert safe_chat_text("fixed the <br> tag, a > b") == "fixed the ‹br› tag, a › b"
+
+
+def test_real_chat_links_and_mentions_are_kept():
+    from daily_task_bot.api.chat import safe_chat_text
+    text = "See <https://openproject.theyellow.network/wp/1|#1> and <users/123>, not <x>"
+    assert safe_chat_text(text) == "See <https://openproject.theyellow.network/wp/1|#1> and <users/123>, not ‹x›"
+
+
+def test_no_built_in_reply_uses_angle_bracket_placeholders():
+    import re
+    from pathlib import Path
+    src = Path(__file__).resolve().parent.parent / "src" / "daily_task_bot"
+    for path in [src / "domain" / "chat_commands.py", src / "services" / "chat_events.py",
+                 src / "services" / "dsr_updates.py"]:
+        assert not re.search(r"<(client|task|hours|work done|status id)>", path.read_text(encoding="utf-8")), path

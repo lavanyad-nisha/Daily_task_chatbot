@@ -5,8 +5,8 @@ Only these commands are accepted. Anything else gets the help text, so the bot n
   HELP                         list the commands
   DSR                          open today's status form
   TASKS                        list your open tasks with numbers
-  UPDATE <task> <hours> <work> record or change hours and work done for a task
-  STATUS <task> <status id>    set the status for a task (from the approved list)
+  UPDATE [task] [hours] <work> record or change hours and work done for a task
+  STATUS [task] [status id]    set the status for a task (from the approved list)
   PREVIEW                      show where today's saved entries would be routed
 """
 
@@ -17,8 +17,8 @@ from typing import Any
 HELP_TEXT = (
     "Commands:\n"
     "TASKS - list your open tasks with numbers\n"
-    "UPDATE <task> <hours> <work done> - record or change a task's hours and work\n"
-    "STATUS <task> <status id> - set a task's status\n"
+    "UPDATE [task] [hours] [work done] - record or change a task's hours and work\n"
+    "STATUS [task] [status id] - set a task's status\n"
     "DSR - open today's status form\n"
     "PREVIEW - show where today's saved entries would be routed\n"
     "HELP - show this list"
@@ -47,12 +47,12 @@ def parse_command(text: str) -> Command:
     if word == "LINK":
         client = " ".join(parts[1:]).strip()
         if not client:
-            return Command("ERROR", error="Use: LINK <client>")
+            return Command("ERROR", error="Use: LINK [client]")
         return Command("LINK", {"client": client})
 
     if word == "UPDATE":
         if len(parts) < 4:
-            return Command("ERROR", error="Use: UPDATE <task> <hours> <work done>")
+            return Command("ERROR", error="Use: UPDATE [task] [hours] [work done]")
         task = _task_number(parts[1])
         hours = _hours(parts[2])
         work = " ".join(parts[3:]).strip()
@@ -66,10 +66,10 @@ def parse_command(text: str) -> Command:
 
     if word == "STATUS":
         if len(parts) != 3:
-            return Command("ERROR", error="Use: STATUS <task> <status id>")
+            return Command("ERROR", error="Use: STATUS [task] [status id]")
         task = _task_number(parts[1])
         if task is None or not parts[2].isdigit():
-            return Command("ERROR", error="Use numbers only: STATUS <task> <status id>")
+            return Command("ERROR", error="Use numbers only: STATUS [task] [status id]")
         return Command("STATUS", {"task": task, "status_id": int(parts[2])})
 
     return Command("HELP", error="Sorry, I did not understand that.")

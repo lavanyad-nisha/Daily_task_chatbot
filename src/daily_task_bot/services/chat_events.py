@@ -313,7 +313,7 @@ async def handle_chat_event(
             if text and text.split()[0].upper() in SPACE_COMMANDS:
                 return _handle_space_rules(event, session=session, settings=settings) or {}
             return _text("Hi! I post updates here once this space is linked to a client. "
-                         "Ask a bot admin to type @Daily Task Bot LINK <client> here. "
+                         f"Ask a bot admin to type @{settings.bot_name} LINK [client] here. "
                          "For your own tasks and DSR, message me privately.")
         return _text("Hi! I send your daily task summary and collect your daily status report here. "
                      "Type DSR to open today's form.")

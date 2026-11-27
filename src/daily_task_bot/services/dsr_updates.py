@@ -92,7 +92,7 @@ def apply_task_change(
     submission = _todays_submission(session, employee, today)
     if submission is None:
         if change.hours is None or change.work_done is None:
-            return "Record hours and work first with UPDATE <task> <hours> <work done>."
+            return "Record hours and work first with UPDATE [task] [hours] [work done]."
         try:
             submission = create_draft(
                 session, employee_id=employee.id, dsr_date=today,
@@ -117,7 +117,7 @@ def apply_task_change(
 
     if entry is None:
         if change.hours is None or change.work_done is None:
-            return "Record hours and work for this task first with UPDATE <task> <hours> <work done>."
+            return "Record hours and work for this task first with UPDATE [task] [hours] [work done]."
         entry = DsrEntry(submission_id=submission.id, work_package_id=change.work_package_id,
                          hours_spent=change.hours, work_done=change.work_done,
                          new_status_id=change.status_id)
