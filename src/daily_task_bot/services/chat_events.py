@@ -245,7 +245,12 @@ def _handle_space_rules(event: dict[str, Any], *, session: Session, settings: Se
             return _text("LINK, UNLINK and LINKED work inside the client's Chat space, not in a private chat.")
         return None
 
-    # Inside a Chat space
+    # Inside a Chat space. Log the shape (never the message text) so space problems can be diagnosed.
+    space = event.get("space") or {}
+    log.info("space event: type=%s space=%s spaceType=%s user=%s command=%s",
+             event.get("type"), space.get("name"), space.get("spaceType") or space.get("type"),
+             (event.get("user") or {}).get("name"), first_word if first_word in SPACE_COMMANDS
+             or first_word in PRIVATE_ONLY_COMMANDS else "-")
     if first_word in SPACE_COMMANDS:
         space_id = (event.get("space") or {}).get("name")
         if not space_id:
@@ -302,6 +307,11 @@ async def handle_chat_event(
 
     if kind == "ADDED_TO_SPACE":
         if not is_private_chat(event):
+            # Added by @mentioning the app with a command (e.g. "@Daily Task Bot LINK GPL"):
+            # answer the command, not only the greeting.
+            text = message_text(event)
+            if text and text.split()[0].upper() in SPACE_COMMANDS:
+                return _handle_space_rules(event, session=session, settings=settings) or {}
             return _text("Hi! I post updates here once this space is linked to a client. "
                          "Ask a bot admin to type @Daily Task Bot LINK <client> here. "
                          "For your own tasks and DSR, message me privately.")

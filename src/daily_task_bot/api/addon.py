@@ -37,6 +37,9 @@ def to_chat_event(event: dict[str, Any]) -> dict[str, Any]:
         payload = chat.get("addedToSpacePayload") or {}
         plain["type"] = "ADDED_TO_SPACE"
         plain["space"] = payload.get("space") or plain["space"]
+        # Added by @mentioning the app: the message that added it comes with the event.
+        if payload.get("message"):
+            plain["message"] = payload["message"]
     elif "removedFromSpacePayload" in chat:
         plain["type"] = "REMOVED_FROM_SPACE"
     elif "buttonClickedPayload" in chat:
