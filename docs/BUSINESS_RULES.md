@@ -4,8 +4,9 @@
 
 Management alone assigns tasks in OpenProject. The bot never creates, assigns, reassigns or
 deletes work packages, and never changes anything on a work package except its status.
-The bot uses AI in one place only: summarising an employee's DSR text for the project Chat space,
-with Claude Haiku 5.5 (`claude-haiku-5-5`), approved by the TL. Only the work-description text is
+The bot uses AI in two places, both with Claude Haiku 5.5 (`claude-haiku-5-5`), approved by the TL:
+summarising an employee's DSR text for the project Chat space (below), and reading free-text task
+updates in private chats (see "Free-text task updates"). Only the work-description text is
 sent. No IDs, names, emails or Chat IDs. The AI is the first choice for every summary. If the AI
 fails for a summary (timeout, error, refusal or empty reply), that one summary uses a rule-based
 shortening. The next summary tries the AI again. Each posted message records how many of its
@@ -125,3 +126,22 @@ and NEW-then-seen cases.
 - Clients and their OpenProject parent project come from `DTB_CLIENTS`; the project ID is stored with the link.
 - TASKS, DSR, PREVIEW, UPDATE and STATUS are refused in spaces. A chat counts as private only when Chat says it is a
   direct message (`spaceType` DIRECT_MESSAGE, `type` DM or `singleUserBotDm`); if the type is missing it is treated as a space.
+
+## Free-text task updates (tests in `tests/test_free_text.py`)
+
+On when `DTB_FREE_TEXT_UPDATES=true` and `ANTHROPIC_API_KEY` is set. Private chats only.
+
+- A message that is not a valid command (for example `2232 completed, 2h retested the export`) is
+  read by Claude Haiku 5.5, which proposes the task, hours, work done and status.
+- The AI only proposes. The bot shows a pre-filled form; nothing is saved until the person presses
+  **Save**, and they can change any field first. **Cancel** saves nothing.
+- The code checks every value the AI returns: the task must be one of the person's open tasks, the
+  status must be an approved status (`DTB_DSR_STATUS_CHOICES`), and hours must be above 0 and at most
+  24. Anything else is dropped. When the person asks for a status that is not approved, or that could
+  mean more than one approved status (such as "completed"), the form says so and they choose.
+- Save goes through the same checks as `UPDATE` and `STATUS`: the task must still be assigned and
+  not completed, the form must be for today, and a status change needs that day's hours and work.
+- Valid commands never go to the AI. If the AI call fails (10-second limit, no retry), the normal
+  help text is shown.
+- Sent to Anthropic: the message, the person's open task numbers, titles and statuses, and the
+  approved status names. No names, emails or Chat IDs. Text is not logged.

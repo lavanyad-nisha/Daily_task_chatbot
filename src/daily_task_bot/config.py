@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     # Task visibility (domain/task_window.py). Completed = closed in OpenProject or one of these
     # status IDs (live IDs: Tested 10, Resolved 16, Passed 17).
     completed_status_ids: list[int] = Field(default_factory=lambda: [10, 16, 17])
+    # Free-text task updates in private chats, read by Claude Haiku 5.5 (services/free_text.py) and
+    # shown as a pre-filled form to check and save. Needs ANTHROPIC_API_KEY. Off by default.
+    free_text_updates: bool = False
     # TASKS and the DSR card list overdue tasks and tasks due within this many days, counting today.
     task_window_days: int = Field(default=7, ge=1, le=31)
 

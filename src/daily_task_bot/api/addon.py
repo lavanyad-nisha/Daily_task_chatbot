@@ -16,10 +16,14 @@ logical action name is carried in a parameter and restored when the click comes 
 import copy
 from typing import Any
 
-from daily_task_bot.domain.chat_cards import SUBMIT_FUNCTION
+from daily_task_bot.domain.chat_cards import (
+    CANCEL_UPDATE_FUNCTION,
+    CONFIRM_UPDATE_FUNCTION,
+    SUBMIT_FUNCTION,
+)
 
 ACTION_PARAM = "dtb_action"
-KNOWN_ACTIONS = frozenset({SUBMIT_FUNCTION})
+KNOWN_ACTIONS = frozenset({SUBMIT_FUNCTION, CONFIRM_UPDATE_FUNCTION, CANCEL_UPDATE_FUNCTION})
 
 
 def is_addon_event(event: Any) -> bool:

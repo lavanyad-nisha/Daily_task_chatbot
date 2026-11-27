@@ -190,3 +190,76 @@ def parse_dsr_form(form_inputs: dict[str, Any], allowed_status_ids: frozenset[in
         remaining = _value(form_inputs, remaining_field(wp)) or None
         result.entries.append(ParsedEntry(wp, hours, description, remaining, status_id))
     return result
+
+
+# ---- check-and-save form for a free-text update (services/free_text.py) ----------------------
+
+CONFIRM_UPDATE_FUNCTION = "confirm_update"
+CANCEL_UPDATE_FUNCTION = "cancel_update"
+
+
+def build_update_card(*, task: CardTask, dsr_date: date, hours: Decimal | None, work_done: str | None,
+                      status_id: int | None, requested_status: str | None,
+                      status_choices: list[StatusChoice]) -> dict[str, Any]:
+    """A pre-filled form for one task. Nothing is saved until the person presses Save."""
+    wp = task.work_package_id
+    widgets: list[dict[str, Any]] = [
+        _text("Please check this update. Nothing is saved until you press Save."),
+        {"decoratedText": {"topLabel": f"#{wp}", "text": f"{task.subject} ({task.status_name})"}},
+        {"textInput": {"name": hours_field(wp), "label": "Hours worked today", "type": "SINGLE_LINE",
+                       "value": "" if hours is None else format(hours.normalize(), "f")}},
+        {"textInput": {"name": work_field(wp), "label": "Work done", "type": "MULTIPLE_LINE",
+                       "value": work_done or ""}},
+    ]
+    if status_choices:
+        items = [{"text": "No change", "value": NO_CHANGE, "selected": status_id is None}] + [
+            {"text": c.name, "value": str(c.status_id), "selected": c.status_id == status_id}
+            for c in status_choices
+        ]
+        widgets.append({"selectionInput": {"name": status_field(wp), "label": "New status",
+                                           "type": "DROPDOWN", "items": items}})
+    if requested_status:
+        allowed = ", ".join(c.name for c in status_choices)
+        widgets.append(_text(
+            f"\"{requested_status}\" is not a status you can set. "
+            + (f"Choose one of: {allowed}." if allowed else "Status changes are not enabled yet.")))
+    params = [{"key": "dsr_date", "value": dsr_date.isoformat()}, {"key": "task", "value": str(wp)}]
+    widgets.append({"buttonList": {"buttons": [
+        {"text": "Save", "onClick": {"action": {"function": CONFIRM_UPDATE_FUNCTION, "parameters": params}}},
+        {"text": "Cancel", "onClick": {"action": {"function": CANCEL_UPDATE_FUNCTION, "parameters": params}}},
+    ]}})
+    return {"cardsV2": [{"cardId": f"update-{wp}", "card": {
+        "header": {"title": "Task update"},
+        "sections": [{"widgets": widgets}],
+    }}]}
+
+
+@dataclass
+class ParsedUpdate:
+    hours: Decimal | None = None
+    work_done: str | None = None
+    status_id: int | None = None
+    errors: list[str] = field(default_factory=list)
+
+
+def parse_update_form(form_inputs: dict[str, Any], wp: int, allowed_status_ids: frozenset[int]) -> ParsedUpdate:
+    """Read the check-and-save form. Blank fields mean 'no change'."""
+    result = ParsedUpdate()
+    raw_hours = _value(form_inputs, hours_field(wp))
+    if raw_hours:
+        try:
+            hours = Decimal(raw_hours)
+        except (InvalidOperation, ValueError):
+            hours = None
+        if hours is None or not Decimal(0) < hours <= Decimal(24):
+            result.errors.append("hours must be a number above 0 and at most 24")
+        else:
+            result.hours = hours
+    result.work_done = _value(form_inputs, work_field(wp)) or None
+    raw_status = _value(form_inputs, status_field(wp))
+    if raw_status and raw_status != NO_CHANGE:
+        if not raw_status.isdigit() or int(raw_status) not in allowed_status_ids:
+            result.errors.append("the status is not an approved choice")
+        else:
+            result.status_id = int(raw_status)
+    return result
