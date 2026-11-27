@@ -312,6 +312,9 @@ class RoutedPost(TimestampMixin, Base):
     space_id: Mapped[str] = mapped_column(String(100))
     post_date: Mapped[date] = mapped_column(Date)
     message_name: Mapped[str | None] = mapped_column(String(200))
+    # How each summary in this post was made. AI first; rule-based only for a summary the AI failed on.
+    ai_summaries: Mapped[int] = mapped_column(Integer, server_default="0")
+    rule_based_summaries: Mapped[int] = mapped_column(Integer, server_default="0")
     sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

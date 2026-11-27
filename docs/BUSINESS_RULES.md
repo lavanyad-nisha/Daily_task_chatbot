@@ -6,8 +6,11 @@ Management alone assigns tasks in OpenProject. The bot never creates, assigns, r
 deletes work packages, and never changes anything on a work package except its status.
 The bot uses AI in one place only: summarising an employee's DSR text for the project Chat space,
 with Claude Haiku 5.5 (`claude-haiku-5-5`), approved by the TL. Only the work-description text is
-sent. No IDs, names, emails or Chat IDs. If the API is unavailable or refuses, a rule-based
-shortening is used instead. The AI never chooses tasks, statuses, hours, projects or spaces.
+sent. No IDs, names, emails or Chat IDs. The AI is the first choice for every summary. If the AI
+fails for a summary (timeout, error, refusal or empty reply), that one summary uses a rule-based
+shortening. The next summary tries the AI again. Each posted message records how many of its
+summaries were AI and how many were rule-based. The AI never chooses tasks, statuses, hours,
+projects or spaces.
 
 The only OpenProject writes the bot performs:
 - creating a time entry for a confirmed DSR entry (`POST /api/v3/time_entries`)

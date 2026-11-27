@@ -126,9 +126,62 @@ def test_posting_uses_the_summary_and_falls_back_to_the_original_text():
     assert "#102: 1 h, Short note" in text
 
 
-def test_short_update_is_not_sent_to_the_model():
-    client, messages = fake_client(response=text_response("should not be used"))
+def test_short_update_is_also_summarised_by_the_ai_first():
+    client, messages = fake_client(response=text_response("Routing dry-run test passed."))
     result = summarize("Routing dry-run test on the scrum test task.", HaikuSummarizer(client))
-    assert result.method == "rule_based"
-    assert result.text == "Routing dry-run test on the scrum test task."
-    assert messages.calls == []
+    assert result.method == "haiku"
+    assert len(messages.calls) == 1
+
+
+def test_each_summary_tries_the_ai_again_after_a_failure():
+    client, messages = fake_client(error=RuntimeError("boom"))
+    summarizer = HaikuSummarizer(client)
+    first = summarize(UPDATE, summarizer)
+    second = summarize(UPDATE, summarizer)
+    assert first.method == second.method == "rule_based"
+    assert len(messages.calls) == 2  # nothing switches the run off
+
+
+@pytest.mark.parametrize("error", [
+    anthropic.APITimeoutError(request=httpx2.Request("POST", "https://x.test/v1/messages")),
+    anthropic.APIConnectionError(request=httpx2.Request("POST", "https://x.test/v1/messages")),
+    RuntimeError("unexpected"),
+])
+def test_any_ai_failure_falls_back_to_rule_based_for_that_summary(error):
+    client, _ = fake_client(error=error)
+    assert summarize(UPDATE, HaikuSummarizer(client)).method == "rule_based"
+
+
+def test_refusal_falls_back_to_rule_based():
+    client, _ = fake_client(response=text_response("partial", stop="refusal"))
+    assert summarize(UPDATE, HaikuSummarizer(client)).method == "rule_based"
+
+
+def test_ai_summary_is_used_when_the_call_succeeds():
+    client, _ = fake_client(response=text_response("Login fix passed retest."))
+    result = summarize(UPDATE, HaikuSummarizer(client))
+    assert result.method == "haiku" and result.text == "Login fix passed retest."
+
+
+def test_failure_log_names_the_error_type_but_not_the_text(monkeypatch):
+    from daily_task_bot.services import summarizer as summarizer_module
+
+    sent: list[tuple] = []
+
+    class _Recorder:
+        def warning(self, message, *args):
+            sent.append((message, *args))
+
+    monkeypatch.setattr(summarizer_module, "log", _Recorder())
+    client, _ = fake_client(error=RuntimeError("secret description text"))
+    summarize(UPDATE, HaikuSummarizer(client))
+    flat = " ".join(str(part) for entry in sent for part in entry)
+    assert "RuntimeError" in flat
+    assert UPDATE not in flat and "secret description text" not in flat
+
+
+def test_ai_client_has_the_30_second_limit_and_one_retry():
+    from daily_task_bot.services.summarizer import AI_TIMEOUT_SECONDS, make_haiku_summarizer
+    summarizer = make_haiku_summarizer("sk-test-not-used")
+    assert summarizer._client.timeout == AI_TIMEOUT_SECONDS == 30.0
+    assert summarizer._client.max_retries == 1
