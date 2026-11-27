@@ -273,3 +273,39 @@ def test_ordinary_text_in_a_space_gets_no_reply(session):
 def test_admin_command_with_no_client_gets_the_usage_message(session):
     reply = _run(session, _space_event("LINK"))
     assert reply["text"] == "Use: LINK <client>"
+
+
+# ---- added to a space by @mentioning the app with a command --------------------------------
+
+def _added_with_message(text, user=ADMIN):
+    return {"type": "ADDED_TO_SPACE", "user": {"name": user},
+            "space": {"name": SPACE, "spaceType": "SPACE"},
+            "message": {"text": f"@Daily Task Bot {text}", "argumentText": f" {text}"}}
+
+
+def test_addon_added_to_space_event_keeps_the_message():
+    from daily_task_bot.api.addon import to_chat_event
+    raw = {"chat": {"user": {"name": ADMIN}, "addedToSpacePayload": {
+        "space": {"name": SPACE, "spaceType": "SPACE"},
+        "message": {"text": "@Daily Task Bot LINK GPL", "argumentText": " LINK GPL"}}}}
+    event = to_chat_event(raw)
+    assert event["type"] == "ADDED_TO_SPACE" and message_text(event) == "LINK GPL"
+
+
+@pytestmark_db
+def test_link_sent_while_adding_the_app_links_the_space(session):
+    assert _run(session, _added_with_message("LINK GPL"))["text"] == "Linked this space to GPL."
+    assert _rows(session)[0].client_name == "GPL"
+
+
+@pytestmark_db
+def test_non_admin_adding_the_app_with_link_is_refused(session):
+    reply = _run(session, _added_with_message("LINK GPL", user=MEMBER))
+    assert reply["text"] == "Only bot admins can link or unlink this space."
+    assert _rows(session) == []
+
+
+@pytestmark_db
+def test_other_text_while_adding_the_app_gets_the_greeting(session):
+    reply = _run(session, _added_with_message("TASKS"))
+    assert "LINK <client>" in reply["text"]
