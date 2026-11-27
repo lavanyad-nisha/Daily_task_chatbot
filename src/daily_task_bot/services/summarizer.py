@@ -1,19 +1,28 @@
-"""Summarise one employee's task update for a project Chat space, with Claude Haiku 5.5.
+"""Summarise one employee's task update for a project Chat space.
+
+Claude Haiku 5.5 is the primary method for every summary. For each summary on its own, if the AI call
+fails for any reason (timeout, connection, server error, rate limit, refusal, empty reply), that summary
+falls back to a rule-based shortening. The next summary tries the AI again. Nothing switches the whole run.
 
 Privacy: only the work-description text is sent to Anthropic. No task IDs, names, emails or Chat IDs.
-Fallback: if the API is missing, fails, is refused, or returns nothing usable, a rule-based
-shortening of the original text is used instead. Text is never written to logs.
+Text is never written to logs. Only the error type name is logged.
 """
 
+import logging
 import re
 from dataclasses import dataclass
 from typing import Any, Protocol
 
 import anthropic
 
+log = logging.getLogger("daily_task_bot.summarizer")
+
 MODEL = "claude-haiku-5-5"
 MAX_OUTPUT_TOKENS = 200
 FALLBACK_MAX_CHARS = 300
+AI_TIMEOUT_SECONDS = 30.0
+AI_METHOD = "haiku"
+RULE_METHOD = "rule_based"
 
 SYSTEM_PROMPT = (
     "You summarise one employee's task update for a project status channel. "
@@ -37,7 +46,13 @@ class Summarizer(Protocol):
 @dataclass(frozen=True)
 class SummaryResult:
     text: str
-    method: str  # "haiku" or "rule_based"
+    method: str  # AI_METHOD or RULE_METHOD
+
+
+def make_haiku_summarizer(api_key: str) -> "HaikuSummarizer":
+    """A Haiku summarizer with the 30-second limit and one retry, so an outage cannot stall the daily job."""
+    client = anthropic.Anthropic(api_key=api_key, timeout=AI_TIMEOUT_SECONDS, max_retries=1)
+    return HaikuSummarizer(client)
 
 
 class HaikuSummarizer:
@@ -78,16 +93,12 @@ def rule_based_summary(text: str, max_chars: int = FALLBACK_MAX_CHARS) -> str:
     return cut.rstrip(" ,;:") + "..."
 
 
-SHORT_UPDATE_WORDS = 20  # short updates are already summaries; they go unchanged
-
-
 def summarize(text: str, summarizer: Summarizer | None) -> SummaryResult:
-    """Haiku summary for longer descriptions; short updates and the fallback use the rule-based text."""
-    if len(text.split()) <= SHORT_UPDATE_WORDS:
-        return SummaryResult(rule_based_summary(text), "rule_based")
+    """AI summary first, every time. If the AI fails for this summary, use the rule-based text for it."""
     if summarizer is not None:
         try:
-            return SummaryResult(summarizer.summarize(text), "haiku")
-        except (anthropic.APIError, SummaryError):
-            pass  # use the fallback; the error text may contain request details, so it is not kept
-    return SummaryResult(rule_based_summary(text), "rule_based")
+            return SummaryResult(summarizer.summarize(text), AI_METHOD)
+        except Exception as exc:  # any AI failure falls back for this summary only; logged by type name
+            # Broad on purpose: a timeout, outage, refusal or bad reply must never stop the post.
+            log.warning("AI summary failed, using rule-based text for this summary: %s", type(exc).__name__)
+    return SummaryResult(rule_based_summary(text), RULE_METHOD)

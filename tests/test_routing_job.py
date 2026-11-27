@@ -191,3 +191,38 @@ def test_live_runs_repeat_after_the_post_time_and_dry_runs_do_not():
 def test_summary_call_has_a_short_timeout():
     from daily_task_bot.services.routing_job import SUMMARY_TIMEOUT_SECONDS
     assert SUMMARY_TIMEOUT_SECONDS <= 60
+
+
+class _AiOk:
+    def summarize(self, text):
+        return "AI summary of the update."
+
+
+class _AiDown:
+    def summarize(self, text):
+        raise RuntimeError("service unavailable")
+
+
+def _run_with(world, summarizer):
+    chat = FakeChat()
+    report = asyncio.run(run_routing_cycle(world["factory"], _settings(dry_run=False), FakeOpenProject(), chat,
+                                           now=NOW_DUE, summarizer=summarizer))
+    return report, chat
+
+
+@pytestmark_db
+def test_live_post_records_that_the_ai_made_the_summary(world):
+    report, chat = _run_with(world, _AiOk())
+    assert report["posted"] == 1
+    assert "AI summary of the update." in chat.posts[0][1]
+    row = world["session"].scalar(select(RoutedPost))
+    assert row.ai_summaries == 1 and row.rule_based_summaries == 0
+
+
+@pytestmark_db
+def test_live_post_records_rule_based_when_the_ai_failed_for_that_summary(world):
+    report, chat = _run_with(world, _AiDown())
+    assert report["posted"] == 1
+    assert "Login UAT passed on staging." in chat.posts[0][1]
+    row = world["session"].scalar(select(RoutedPost))
+    assert row.ai_summaries == 0 and row.rule_based_summaries == 1
