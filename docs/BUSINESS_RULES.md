@@ -4,8 +4,9 @@
 
 Management alone assigns tasks in OpenProject. The bot never creates, assigns, reassigns or
 deletes work packages, and never changes anything on a work package except its status.
-The bot uses AI in one place only: summarising an employee's DSR text for the project Chat space,
-with Claude Haiku 5.5 (`claude-haiku-5-5`), approved by the TL. Only the work-description text is
+The bot uses AI in two places, both with Claude Haiku 5.5 (`claude-haiku-5-5`), approved by the TL:
+summarising an employee's DSR text for the project Chat space (below), and reading free-text task
+updates in private chats (see "Free-text task updates"). Only the work-description text is
 sent. No IDs, names, emails or Chat IDs. The AI is the first choice for every summary. If the AI
 fails for a summary (timeout, error, refusal or empty reply), that one summary uses a rule-based
 shortening. The next summary tries the AI again. Each posted message records how many of its
@@ -36,15 +37,21 @@ updates off. Enforced by `tests/test_business_rules.py`.
 
 Two rules, with different scopes:
 
-**Eligible for update (DSR card, `TASKS`, `UPDATE`, `STATUS`, DSR submission).** A task is eligible
-when all are true, on any date:
+**Eligible (DSR submission).** A task is eligible when all are true:
 1. It is not completed. Completed means closed or rejected in OpenProject, or one of the statuses
    Tested (10), Resolved (16), Passed (17) (`COMPLETED_STATUS_IDS`).
 2. Its assignee is that employee's OpenProject user ID.
 3. It belongs to a project in `DTB_OPENPROJECT_PROJECT_IDS`, when that list is set.
 
-Start and due dates do not limit updates. An employee can update an eligible task at any time, even
-if it was not in that day's reminder. Overdue and future-dated tasks are eligible.
+**Listed (DSR card, `TASKS`, and the numbers `UPDATE` and `STATUS` use).** An eligible task is listed
+only when it has a due date that is either:
+- before today: shown under **Overdue**, or
+- today or within the next 7 days counting today (`DTB_TASK_WINDOW_DAYS`, default 7): shown under
+  **Due in the next 7 days**.
+
+Tasks with no due date, or due after the window, are not listed. Start dates are ignored. Overdue tasks
+come first, then due-soon tasks, each by due date and then ID; the numbers run straight through both
+sections. The DSR card shows the same two sections.
 
 **Due for a reminder (morning plan and daily summary).** A task is listed in the reminder only when it
 is eligible and its due date is today, in `Asia/Kolkata`. Start dates and other days are ignored.
@@ -52,10 +59,15 @@ is eligible and its due date is today, in `Asia/Kolkata`. Start dates and other 
 **Submission check:** a DSR entry is refused only if its task is closed, completed, or not assigned to
 the employee. Future-dated and overdue tasks are accepted.
 
-Tasks without a due date are not reminded, but they stay eligible for updates.
+Tasks without a due date are not reminded or listed. To get one onto the list, set its due date in
+OpenProject.
 
-The earlier settings `DTB_SHOW_OVERDUE_TASKS` and `DTB_SHOW_UNDATED_TASKS` were removed. Overdue
-and undated tasks stay updatable, and reminders list only tasks due today.
+**Missing dates note.** `TASKS` ends with a note naming the person's open, not-completed tasks that are
+not listed because their start or due date is not set (up to 10 by name, then a count). The DSR card
+shows the same note with task IDs (up to 15). The bot does not send separate reminders for this.
+
+The earlier settings `DTB_SHOW_OVERDUE_TASKS` and `DTB_SHOW_UNDATED_TASKS` were removed. Reminders
+list only tasks due today.
 
 Note: earlier the code deliberately ignored OpenProject dates as stale (`API_MAPPINGS.md`,
 `models.py`). Start and due dates are now used. Percentage done and estimates are still not used.
@@ -114,3 +126,22 @@ and NEW-then-seen cases.
 - Clients and their OpenProject parent project come from `DTB_CLIENTS`; the project ID is stored with the link.
 - TASKS, DSR, PREVIEW, UPDATE and STATUS are refused in spaces. A chat counts as private only when Chat says it is a
   direct message (`spaceType` DIRECT_MESSAGE, `type` DM or `singleUserBotDm`); if the type is missing it is treated as a space.
+
+## Free-text task updates (tests in `tests/test_free_text.py`)
+
+On when `DTB_FREE_TEXT_UPDATES=true` and `ANTHROPIC_API_KEY` is set. Private chats only.
+
+- A message that is not a valid command (for example `2232 completed, 2h retested the export`) is
+  read by Claude Haiku 5.5, which proposes the task, hours, work done and status.
+- The AI only proposes. The bot shows a pre-filled form; nothing is saved until the person presses
+  **Save**, and they can change any field first. **Cancel** saves nothing.
+- The code checks every value the AI returns: the task must be one of the person's open tasks, the
+  status must be an approved status (`DTB_DSR_STATUS_CHOICES`), and hours must be above 0 and at most
+  24. Anything else is dropped. When the person asks for a status that is not approved, or that could
+  mean more than one approved status (such as "completed"), the form says so and they choose.
+- Save goes through the same checks as `UPDATE` and `STATUS`: the task must still be assigned and
+  not completed, the form must be for today, and a status change needs that day's hours and work.
+- Valid commands never go to the AI. If the AI call fails (10-second limit, no retry), the normal
+  help text is shown.
+- Sent to Anthropic: the message, the person's open task numbers, titles and statuses, and the
+  approved status names. No names, emails or Chat IDs. Text is not logged.

@@ -10,7 +10,8 @@ Security:
 """
 
 import logging
-from datetime import date, datetime
+from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from google.auth.transport import requests as google_requests
@@ -21,14 +22,27 @@ from sqlalchemy.orm import Session
 from daily_task_bot.config import Settings
 from daily_task_bot.db.models import DsrEntry, DsrSubmission, Employee
 from daily_task_bot.domain.chat_cards import (
+    CANCEL_UPDATE_FUNCTION,
+    CONFIRM_UPDATE_FUNCTION,
     SUBMIT_FUNCTION,
     CardTask,
     StatusChoice,
     build_dsr_card,
+    build_update_card,
+    due_label,
     parse_dsr_form,
+    parse_update_form,
+    task_sections,
 )
 from daily_task_bot.domain.chat_commands import HELP_TEXT, parse_command
-from daily_task_bot.domain.task_window import TaskRules, is_completed, is_eligible, task_flag
+from daily_task_bot.domain.task_window import (
+    OVERDUE,
+    TaskRules,
+    is_completed,
+    is_eligible,
+    is_missing_dates,
+    window_group,
+)
 from daily_task_bot.services.dsr import (
     DsrConflictError,
     DsrValidationError,
@@ -104,23 +118,92 @@ def find_employee(session: Session, event: dict[str, Any]) -> Employee | None:
     return employee
 
 
-async def open_tasks_for(op_client: Any, employee: Employee, settings: Settings, today: date) -> list[CardTask]:
-    """Tasks for the DSR card and TASKS: every open task assigned to the employee, on any date."""
+@dataclass(frozen=True)
+class TaskOverview:
+    listed: list[CardTask]  # overdue, then due soon; the numbers TASKS, UPDATE and STATUS use
+    missing_dates: list[CardTask]  # open tasks not listed because a start or due date is not set
+    all_open: list[CardTask] = field(default_factory=list)  # every open task of the person, by ID
+
+
+async def task_overview(op_client: Any, employee: Employee, settings: Settings, today: date) -> TaskOverview:
+    """The employee's open tasks, split into the listed ones and the ones that need dates.
+
+    Listed: overdue or due within the window (task_window_days, counting today), overdue first, then
+    due soon; each by due date, then ID. Missing dates: open tasks not listed whose start or due date
+    is not set, by ID. Tasks due after the window (with both dates set) are in neither list.
+    """
     statuses = await op_client.get_statuses()
     packages = await op_client.get_open_work_packages(
         statuses, settings.openproject_project_ids or None, assignee_id=employee.openproject_user_id,
     )
     rules = TaskRules.from_settings(settings)
-    return [
-        CardTask(wp.id, wp.subject, _status_label(wp, today))
-        for wp in sorted(packages, key=lambda w: w.id)
-        if wp.assignee_id == employee.openproject_user_id and is_eligible(wp, rules)
-    ]
+    mine = [wp for wp in packages if wp.assignee_id == employee.openproject_user_id]
+    grouped = [(window_group(wp, today, rules), wp) for wp in mine]
+    listed = sorted(((g, wp) for g, wp in grouped if g is not None),
+                    key=lambda gw: (gw[0] != OVERDUE, gw[1].due_date, gw[1].id))
+    listed_ids = {wp.id for _, wp in listed}
+    undated = sorted((wp for wp in mine if wp.id not in listed_ids and is_missing_dates(wp, rules)),
+                     key=lambda wp: wp.id)
+    return TaskOverview(
+        listed=[CardTask(wp.id, wp.subject, wp.status_name, wp.due_date, g) for g, wp in listed],
+        missing_dates=[CardTask(wp.id, wp.subject, wp.status_name) for wp in undated],
+        all_open=[CardTask(wp.id, wp.subject, wp.status_name, wp.due_date)
+                  for wp in sorted(mine, key=lambda w: w.id) if is_eligible(wp, rules)],
+    )
 
 
-def _status_label(wp: Any, today: date) -> str:
-    flag = task_flag(wp, today)
-    return f"{wp.status_name}, {flag}" if flag else wp.status_name
+async def open_tasks_for(op_client: Any, employee: Employee, settings: Settings, today: date) -> list[CardTask]:
+    """The listed tasks only (see task_overview). UPDATE and STATUS numbers follow this order."""
+    return (await task_overview(op_client, employee, settings, today)).listed
+
+
+MISSING_DATES_SHOWN = 10  # keep the note short; the rest are counted
+
+
+def missing_dates_note(tasks: list[CardTask]) -> str | None:
+    """A note naming the person's open tasks that have no start or due date. None when there are none."""
+    if not tasks:
+        return None
+    count = len(tasks)
+    noun = "task has" if count == 1 else "tasks have"
+    lines = [(f"Missing dates: {count} of your open {noun} no start or due date in OpenProject, so "
+              f"{'it is' if count == 1 else 'they are'} not listed. Please add both dates in OpenProject:")]
+    lines += [f"- #{t.work_package_id} {t.subject} ({t.status_name})" for t in tasks[:MISSING_DATES_SHOWN]]
+    if count > MISSING_DATES_SHOWN:
+        lines.append(f"...and {count - MISSING_DATES_SHOWN} more.")
+    return "\n".join(lines)
+
+
+def _day(value: date) -> str:
+    return f"{value.day} {value.strftime('%b')}"
+
+
+def tasks_text(tasks: list[CardTask], today: date, window_days: int,
+               missing_dates: list[CardTask] | None = None) -> str:
+    """The TASKS reply: an Overdue section, then a Due soon section, numbered straight through,
+    then a note naming open tasks that are not listed because they have no start or due date."""
+    note = missing_dates_note(missing_dates or [])
+    body = _listed_text(tasks, today, window_days)
+    return f"{body}\n\n{note}" if note else body
+
+
+def _listed_text(tasks: list[CardTask], today: date, window_days: int) -> str:
+    if not tasks:
+        return (f"You have no overdue tasks and none due in the next {window_days} days. A task is listed "
+                "when it is assigned to you in OpenProject, not completed, and its due date is past or within "
+                f"the next {window_days} days. Tasks with no due date are not listed.")
+    last = today + timedelta(days=window_days - 1)
+    soon_header = f"Due in the next {window_days} days ({_day(today)} - {_day(last)})"
+    blocks: list[str] = []
+    number = 0
+    for header, group in task_sections(tasks, soon_header):
+        lines = [f"{header}:"] if header else []
+        for task in group:
+            number += 1
+            lines.append(f"{number}. #{task.work_package_id} {task.subject} "
+                         f"({task.status_name}, {due_label(task.due_date)})")
+        blocks.append("\n".join(lines))
+    return "Your tasks:\n\n" + "\n\n".join(blocks)
 
 
 async def status_choices_for(op_client: Any, settings: Settings) -> list[StatusChoice]:
@@ -130,11 +213,14 @@ async def status_choices_for(op_client: Any, settings: Settings) -> list[StatusC
 
 async def dsr_card_for(session: Session, op_client: Any, settings: Settings, employee: Employee,
                        today: date) -> dict[str, Any]:
+    overview = await task_overview(op_client, employee, settings, today)
     return build_dsr_card(
         employee_name=employee.name,
         dsr_date=today,
-        tasks=await open_tasks_for(op_client, employee, settings, today),
+        tasks=overview.listed,
         status_choices=await status_choices_for(op_client, settings),
+        window_days=settings.task_window_days,
+        missing_dates=overview.missing_dates,
     )
 
 
@@ -320,6 +406,70 @@ async def _validate_tasks(op_client: Any, employee: Employee, work_package_ids: 
     return problems
 
 
+async def _save_change(session: Session, op_client: Any, settings: Settings, employee: Employee,
+                       today: date, change: TaskChange, now: datetime | None) -> str:
+    """Save one task change (UPDATE, STATUS or a confirmed free-text update) with the usual checks.
+
+    A status change goes to OpenProject at once when live writes are on.
+    """
+    message = apply_task_change(
+        session, employee=employee, today=today, change=change,
+        allowed_status_ids=frozenset(settings.dsr_status_choices),
+        go_live=settings.dsr_go_live_date, now=now or datetime.now(),
+    )
+    if change.status_id is not None and immediate_status_enabled(settings):
+        pushed = await _push_status_for(session, op_client, settings, employee, today,
+                                        change.work_package_id, now or datetime.now())
+        if pushed is not None:
+            return pushed
+    return message
+
+
+NOT_UNDERSTOOD = ("Sorry, I could not tell which of your tasks you meant. Mention the task number "
+                  "(for example 2232 completed), or type TASKS to see your list.")
+
+
+async def _free_text_reply(text: str, interpreter: Any, op_client: Any, settings: Settings,
+                           employee: Employee, today: date) -> dict[str, Any] | None:
+    """A pre-filled check-and-save form, or a short 'not understood' reply. None = use the help text."""
+    overview = await task_overview(op_client, employee, settings, today)
+    if not overview.all_open:
+        return None
+    choices = await status_choices_for(op_client, settings)
+    proposal = await interpreter.interpret(text, overview.all_open, choices)
+    if proposal is None:
+        return None  # the AI failed: the normal help text is shown
+    if proposal.task is None or not proposal.has_change:
+        return _text(f"{NOT_UNDERSTOOD}\n\n{HELP_TEXT}")
+    return build_update_card(task=proposal.task, dsr_date=today, hours=proposal.hours,
+                             work_done=proposal.work_done, status_id=proposal.status_id,
+                             requested_status=proposal.requested_status, status_choices=choices)
+
+
+async def _confirm_update(common: dict[str, Any], session: Session, op_client: Any, settings: Settings,
+                          employee: Employee, today: date, now: datetime | None) -> dict[str, Any]:
+    """Save or cancel a check-and-save form. Every value is checked again here."""
+    params = common.get("parameters") or {}
+    if common.get("invokedFunction") == CANCEL_UPDATE_FUNCTION:
+        return _text("Cancelled. Nothing was saved.")
+    if params.get("dsr_date") != today.isoformat():
+        return _text("This form is for a different day. Send the update again.")
+    raw_task = str(params.get("task") or "")
+    if not raw_task.isdigit():
+        return _text("That action is not available.")
+    wp_id = int(raw_task)
+    parsed = parse_update_form(common.get("formInputs") or {}, wp_id, frozenset(settings.dsr_status_choices))
+    if parsed.errors:
+        return _text("Nothing was saved: " + "; ".join(parsed.errors) + ".")
+    if parsed.hours is None and parsed.work_done is None and parsed.status_id is None:
+        return _text("Nothing was saved: there was nothing to change.")
+    problems = await _validate_tasks(op_client, employee, [wp_id], today, TaskRules.from_settings(settings))
+    if problems:
+        return _text("Nothing was saved. " + "; ".join(problems))
+    change = TaskChange(wp_id, hours=parsed.hours, work_done=parsed.work_done, status_id=parsed.status_id)
+    return _text(await _save_change(session, op_client, settings, employee, today, change, now))
+
+
 async def handle_chat_event(
     event: dict[str, Any],
     *,
@@ -327,8 +477,13 @@ async def handle_chat_event(
     op_client: Any,
     settings: Settings,
     now: datetime | None = None,
+    interpreter: Any | None = None,
 ) -> dict[str, Any]:
-    """Return the Chat response body. The caller commits the session on success."""
+    """Return the Chat response body. The caller commits the session on success.
+
+    interpreter (services/free_text.py) reads messages that are not a valid command, in private
+    chats, when DTB_FREE_TEXT_UPDATES is on. It only proposes; the person saves.
+    """
     kind = event.get("type")
     today = local_today(settings, now)
 
@@ -360,7 +515,13 @@ async def handle_chat_event(
         return _text("Your Chat account is not linked to a task profile. Please contact your administrator.")
 
     if kind == "MESSAGE":
-        command = parse_command(message_text(event))
+        text = message_text(event)
+        command = parse_command(text)
+        if command.error and interpreter is not None and settings.free_text_updates \
+                and command.name in ("HELP", "ERROR") and is_private_chat(event)                 and text.split()[0].upper() not in SPACE_COMMANDS:
+            reply = await _free_text_reply(text, interpreter, op_client, settings, employee, today)
+            if reply is not None:
+                return reply
         if command.error:
             return _text(f"{command.error}\n\n{HELP_TEXT}")
         if command.name == "DSR":
@@ -369,14 +530,10 @@ async def handle_chat_event(
             return _text(HELP_TEXT)
         if command.name == "PREVIEW":
             return _text(await preview_text_for(session, op_client, employee, today))
-        tasks = await open_tasks_for(op_client, employee, settings, today)
         if command.name == "TASKS":
-            if not tasks:
-                return _text("You have no open tasks for today. A task shows up here when it is assigned to "
-                             "you in OpenProject, not completed, and its start date has come.")
-            lines = [f"{i}. #{t.work_package_id} {t.subject} ({t.status_name})"
-                     for i, t in enumerate(tasks, start=1)]
-            return _text("Your open tasks:\n" + "\n".join(lines))
+            overview = await task_overview(op_client, employee, settings, today)
+            return _text(tasks_text(overview.listed, today, settings.task_window_days, overview.missing_dates))
+        tasks = await open_tasks_for(op_client, employee, settings, today)
         if command.name in ("UPDATE", "STATUS"):
             number = command.args["task"]
             if number > len(tasks):
@@ -386,21 +543,13 @@ async def handle_chat_event(
                 change = TaskChange(wp_id, hours=command.args["hours"], work_done=command.args["work"])
             else:
                 change = TaskChange(wp_id, status_id=command.args["status_id"])
-            message = apply_task_change(
-                session, employee=employee, today=today, change=change,
-                allowed_status_ids=frozenset(settings.dsr_status_choices),
-                go_live=settings.dsr_go_live_date, now=now or datetime.now(),
-            )
-            if command.name == "STATUS" and immediate_status_enabled(settings):
-                pushed = await _push_status_for(session, op_client, settings, employee, today,
-                                                wp_id, now or datetime.now())
-                if pushed is not None:
-                    return _text(pushed)
-            return _text(message)
+            return _text(await _save_change(session, op_client, settings, employee, today, change, now))
         return _text(HELP_TEXT)
 
     if kind == "CARD_CLICKED":
         common = event.get("common") or {}
+        if common.get("invokedFunction") in (CONFIRM_UPDATE_FUNCTION, CANCEL_UPDATE_FUNCTION):
+            return await _confirm_update(common, session, op_client, settings, employee, today, now)
         if common.get("invokedFunction") != SUBMIT_FUNCTION:
             return _text("That action is not available.")
         params = common.get("parameters") or {}

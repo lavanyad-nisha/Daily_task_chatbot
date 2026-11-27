@@ -22,6 +22,7 @@ from daily_task_bot.api.internal import get_openproject_port, get_session_factor
 from daily_task_bot.clients.openproject import OpenProjectClient
 from daily_task_bot.config import Settings, get_settings
 from daily_task_bot.services.chat_events import ChatAuthError, handle_chat_event, verify_chat_token
+from daily_task_bot.services.free_text import Interpreter, make_haiku_interpreter
 
 router = APIRouter()
 log = logging.getLogger("uvicorn.error")
@@ -51,6 +52,19 @@ def _safe_body(body: dict[str, Any]) -> dict[str, Any]:
     return body
 
 
+_interpreter: Interpreter | None = None
+
+
+def get_free_text_interpreter(settings: Settings = Depends(get_settings)) -> Interpreter | None:
+    """The Haiku reader for free-text updates, or None when the feature or the key is off."""
+    global _interpreter
+    if not settings.free_text_updates or settings.anthropic_api_key is None:
+        return None
+    if _interpreter is None:
+        _interpreter = make_haiku_interpreter(settings.anthropic_api_key.get_secret_value())
+    return _interpreter
+
+
 def _bearer(authorization: str | None) -> str:
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="missing bearer token")
@@ -64,6 +78,7 @@ async def chat_event(
     settings: Settings = Depends(get_settings),
     factory: sessionmaker = Depends(get_session_factory),
     op_client: OpenProjectClient = Depends(get_openproject_port),
+    interpreter: Interpreter | None = Depends(get_free_text_interpreter),
 ) -> dict[str, Any]:
     if not settings.chat_endpoint_audience:
         raise HTTPException(status_code=503, detail="chat endpoint audience is not configured")
@@ -80,7 +95,8 @@ async def chat_event(
 
     with factory() as session:
         try:
-            body = await handle_chat_event(event, session=session, op_client=op_client, settings=settings)
+            body = await handle_chat_event(event, session=session, op_client=op_client, settings=settings,
+                                           interpreter=interpreter)
             session.commit()
         except Exception:
             session.rollback()
