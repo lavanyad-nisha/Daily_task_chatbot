@@ -107,7 +107,9 @@ def find_employee(session: Session, event: dict[str, Any]) -> Employee | None:
 async def open_tasks_for(op_client: Any, employee: Employee, settings: Settings, today: date) -> list[CardTask]:
     """Tasks for the DSR card and TASKS: every open task assigned to the employee, on any date."""
     statuses = await op_client.get_statuses()
-    packages = await op_client.get_open_work_packages(statuses, settings.openproject_project_ids or None)
+    packages = await op_client.get_open_work_packages(
+        statuses, settings.openproject_project_ids or None, assignee_id=employee.openproject_user_id,
+    )
     rules = TaskRules.from_settings(settings)
     return [
         CardTask(wp.id, wp.subject, _status_label(wp, today))

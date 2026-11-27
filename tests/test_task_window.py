@@ -77,7 +77,7 @@ class FakeOpenProject:
     async def get_statuses(self):
         return {}
 
-    async def get_open_work_packages(self, statuses, project_ids=None):
+    async def get_open_work_packages(self, statuses, project_ids=None, assignee_id=None):
         return [p for p in self.packages if not p.status_is_closed]
 
     async def get_work_package(self, wp_id, statuses=None):
